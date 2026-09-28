@@ -29,6 +29,8 @@ export function floraMaterial(kind, maxDist) {
   const uniforms = { uMaxDist: { value: maxDist } };
   patchStandard(m, {
     key: `flora-${kind}`,
+    // grass blades are seen edge on all the time, a full rim makes them glow
+    rim: kind === 'plant' ? 0.2 : 0.5,
     uniforms,
     vertexPars: /* glsl */ `
       attribute float aSway;

@@ -78,7 +78,7 @@ export class Sky {
       uSeed: { value: 0 },
       uNebA: { value: new THREE.Color(0.4, 0.1, 0.5) },
       uNebB: { value: new THREE.Color(0.1, 0.3, 0.6) },
-      uIntensity: { value: 0.06 },
+      uIntensity: { value: 0.13 },
     };
     const bg = new THREE.Mesh(
       new THREE.SphereGeometry(SKY_R, 48, 24),
@@ -132,7 +132,7 @@ export class Sky {
       fp[i * 3] = r * Math.cos(t) * SKY_R * 0.98;
       fp[i * 3 + 1] = y * SKY_R * 0.98;
       fp[i * 3 + 2] = r * Math.sin(t) * SKY_R * 0.98;
-      const b = rng.range(0.05, 0.35) * rng.range(0.3, 1);
+      const b = rng.range(0.08, 0.5) * rng.range(0.3, 1);
       const warm = rng.next();
       fc[i * 3] = b * (0.8 + warm * 0.3);
       fc[i * 3 + 1] = b * (0.85 + warm * 0.1);
@@ -168,7 +168,7 @@ export class Sky {
       pos[i * 3 + 2] = (dz / d) * SKY_R;
       const cls = STAR_CLASSES[CLASS_KEYS[g.classes[i]]];
       tmp.set(cls.color);
-      const b = Math.min(3.5, 0.18 + 900 / (d * d + 30)) * (cls.tier >= 3 ? 1.4 : 1);
+      const b = Math.min(4, 0.3 + 900 / (d * d + 30)) * (cls.tier >= 3 ? 1.4 : 1);
       col[i * 3] = tmp.r * b;
       col[i * 3 + 1] = tmp.g * b;
       col[i * 3 + 2] = tmp.b * b;

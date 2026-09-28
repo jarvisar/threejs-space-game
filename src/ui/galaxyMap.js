@@ -3,6 +3,7 @@ import { STAR_CLASSES, CLASS_KEYS, GALAXY_RADIUS, CORE_INDEX } from '../gen/gala
 import { generateSystem } from '../gen/system.js';
 import { stats } from '../game/upgrades.js';
 import { RNG } from '../core/rng.js';
+import { planRoute } from '../gen/route.js';
 import { radialTexture } from '../render/textures.js';
 
 const starVert = /* glsl */ `
@@ -32,6 +33,29 @@ void main() {
   core *= core;
   float dim = vState < -0.5 ? 0.35 : 1.0;
   gl_FragColor = vec4(vColor * core * dim * 1.6, 1.0);
+}
+`;
+
+// soft clouds of light along the arms, sized in world units so they read as
+// nebulae when zoomed in and blend into the arms from far out
+const nebVert = /* glsl */ `
+attribute vec3 aColor;
+attribute float aSize;
+uniform float uScale;
+varying vec3 vColor;
+void main() {
+  vColor = aColor;
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  gl_PointSize = clamp(aSize * uScale * 900.0 / -mv.z, 2.0, 700.0);
+  gl_Position = projectionMatrix * mv;
+}
+`;
+const nebFrag = /* glsl */ `
+varying vec3 vColor;
+void main() {
+  vec2 c = gl_PointCoord - 0.5;
+  float a = exp(-dot(c, c) * 10.0) * smoothstep(0.5, 0.3, length(c));
+  gl_FragColor = vec4(vColor * a, 1.0);
 }
 `;
 
@@ -133,7 +157,7 @@ export class GalaxyMap {
       dp[i * 3 + 1] = rng.gauss() * (6 + 30 * Math.exp(-r / 200));
       dp[i * 3 + 2] = r * Math.sin(th);
       const c = cool.clone().lerp(warm, Math.exp(-r / 350));
-      const b = rng.range(0.05, 0.16);
+      const b = rng.range(0.07, 0.2);
       dc[i * 3] = c.r * b;
       dc[i * 3 + 1] = c.g * b;
       dc[i * 3 + 2] = c.b * b;
@@ -147,6 +171,59 @@ export class GalaxyMap {
     const dust = new THREE.Points(dgeo, this.points.material);
     dust.frustumCulled = false;
     this.scene.add(dust);
+
+    const nebN = 900;
+    const np = new Float32Array(nebN * 3);
+    const nc = new Float32Array(nebN * 3);
+    const ns = new Float32Array(nebN);
+    const tints = [new THREE.Color('#ff5fa8'), new THREE.Color('#6f8cff'), new THREE.Color('#b06bff'), new THREE.Color('#4fd6ff'), new THREE.Color('#ffb070')];
+    for (let i = 0; i < nebN; i++) {
+      const r = Math.min(GALAXY_RADIUS, -Math.log(1 - rng.next() * 0.95) * 300 + 80);
+      const arm = rng.int(0, galaxy.arms - 1);
+      const th = galaxy.armOffset + (arm * Math.PI * 2) / galaxy.arms + Math.log(r / 60) / Math.tan(galaxy.pitch) + rng.gauss() * 0.14;
+      np[i * 3] = r * Math.cos(th);
+      np[i * 3 + 1] = rng.gauss() * 6;
+      np[i * 3 + 2] = r * Math.sin(th);
+      // warmer toward the core, star forming pink and blue out in the arms
+      const c = r < 260 ? tints[4] : tints[rng.int(0, 3)];
+      const b = rng.range(0.012, 0.035);
+      nc[i * 3] = c.r * b;
+      nc[i * 3 + 1] = c.g * b;
+      nc[i * 3 + 2] = c.b * b;
+      ns[i] = rng.range(40, 110);
+    }
+    const ngeo = new THREE.BufferGeometry();
+    ngeo.setAttribute('position', new THREE.BufferAttribute(np, 3));
+    ngeo.setAttribute('aColor', new THREE.BufferAttribute(nc, 3));
+    ngeo.setAttribute('aSize', new THREE.BufferAttribute(ns, 1));
+    const nebula = new THREE.Points(ngeo, new THREE.ShaderMaterial({ uniforms: { uScale: this.starUniforms.uScale }, vertexShader: nebVert, fragmentShader: nebFrag, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+    nebula.frustumCulled = false;
+    this.scene.add(nebula);
+
+    // faint stars far behind the galaxy, so zoomed in views aren't pure black
+    const bgN = 3000;
+    const bp = new Float32Array(bgN * 3);
+    const bc = new Float32Array(bgN * 3);
+    const bs = new Float32Array(bgN);
+    for (let i = 0; i < bgN; i++) {
+      const z = rng.range(-1, 1), t = rng.range(0, Math.PI * 2), rr = Math.sqrt(1 - z * z);
+      bp[i * 3] = rr * Math.cos(t) * 9000;
+      bp[i * 3 + 1] = z * 9000;
+      bp[i * 3 + 2] = rr * Math.sin(t) * 9000;
+      const b = rng.range(0.15, 0.5);
+      bc[i * 3] = b;
+      bc[i * 3 + 1] = b;
+      bc[i * 3 + 2] = b * 1.15;
+      bs[i] = 14;
+    }
+    const bgeo = new THREE.BufferGeometry();
+    bgeo.setAttribute('position', new THREE.BufferAttribute(bp, 3));
+    bgeo.setAttribute('aColor', new THREE.BufferAttribute(bc, 3));
+    bgeo.setAttribute('aSize', new THREE.BufferAttribute(bs, 1));
+    bgeo.setAttribute('aState', new THREE.BufferAttribute(new Float32Array(bgN), 1));
+    const bg = new THREE.Points(bgeo, this.points.material);
+    bg.frustumCulled = false;
+    this.scene.add(bg);
 
     // soft disc and core glow
     const disc = new THREE.Mesh(
@@ -190,6 +267,24 @@ export class GalaxyMap {
     // the line ends move every frame, a stale bounding sphere would cull them
     this.route.frustumCulled = false;
     this.scene.add(this.route);
+    // planned multi jump route, up to 64 stops
+    this.routePathGeo = new THREE.BufferGeometry();
+    this.routePathGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(64 * 3), 3));
+    this.routePath = new THREE.Line(this.routePathGeo, new THREE.LineBasicMaterial({ color: new THREE.Color(1.8, 1.2, 0.5), transparent: true, opacity: 0.95 }));
+    this.routePath.frustumCulled = false;
+    this.routePath.visible = false;
+    this.scene.add(this.routePath);
+    this.routeStops = new THREE.Points(
+      this.routePathGeo,
+      new THREE.PointsMaterial({ map: ringTex, size: 9, sizeAttenuation: false, color: new THREE.Color(1.8, 1.2, 0.5), transparent: true, depthWrite: false, depthTest: false })
+    );
+    this.routeStops.frustumCulled = false;
+    this.routeStops.visible = false;
+    this.scene.add(this.routeStops);
+    // where the player has been, in the order they went
+    this.trail = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: new THREE.Color(0.45, 0.85, 1.3), transparent: true, opacity: 0.45 }));
+    this.trail.frustumCulled = false;
+    this.scene.add(this.trail);
     this.goalGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
     this.goalLine = new THREE.Line(this.goalGeo, new THREE.LineDashedMaterial({ color: new THREE.Color(1.2, 1.0, 1.8), dashSize: 4, gapSize: 3, transparent: true, opacity: 0.6 }));
     this.goalLine.frustumCulled = false;
@@ -207,7 +302,7 @@ export class GalaxyMap {
         <div><i style="--c:#8fb0ff"></i>Blue giants, needs Azure Drive</div>
         <div><i style="--c:#c07bff"></i>Anomalous stars, needs Chorus Drive</div>
         <div><i class="ring"></i>Visited</div>
-        <div class="gmap-keys"><kbd>Drag</kbd>rotate <kbd>Wheel</kbd>zoom <kbd>C</kbd>center <kbd>T</kbd>signal <kbd>G</kbd>close</div>
+        <div class="gmap-keys"><kbd>Drag</kbd>rotate <kbd>Wheel</kbd>zoom <kbd>C</kbd>center <kbd>T</kbd>signal <button class="gmap-close"><kbd>G</kbd>close</button></div>
       </div>
       <div class="gmap-info"></div>
       <div class="gmap-hover"></div>`;
@@ -215,10 +310,15 @@ export class GalaxyMap {
     this.ui = ui;
     this.info = ui.querySelector('.gmap-info');
     this.hoverEl = ui.querySelector('.gmap-hover');
+    ui.querySelector('.gmap-close').onclick = (e) => {
+      // a focused button would keep taking Space once the map is hidden
+      e.currentTarget.blur();
+      this.game.closeMenus();
+    };
     this.info.addEventListener('click', (e) => {
       const b = e.target.closest('[data-act]');
       if (!b || b.disabled) return;
-      if (b.dataset.act === 'warp') this.game.requestWarp(this.selected);
+      if (b.dataset.act === 'warp') this.game.requestWarp(this.nextStop());
       if (b.dataset.act === 'core') this.game.requestCoreJump();
     });
   }
@@ -296,7 +396,10 @@ export class GalaxyMap {
     // the core glow fills the screen up close
     this.goalDist = here === CORE_INDEX ? 900 : 260;
     this.refreshStates();
-    this.select(this.selected >= 0 ? this.selected : -1);
+    // a route set earlier picks up from wherever the player is now
+    const st = this.game.state;
+    if (st.route !== undefined && st.route !== null && st.route !== here) this.select(st.route);
+    else this.select(this.selected >= 0 && this.selected !== here ? this.selected : -1);
   }
 
   hide() {
@@ -326,6 +429,13 @@ export class GalaxyMap {
     this.visitedPts.geometry.dispose();
     this.visitedPts.geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(vp, 3));
     this.visitedPts.material.size = 12 * this.game.renderer.getPixelRatio();
+    const path = st.visited.filter((v) => v >= 0);
+    const tp = new Float32Array(path.length * 3);
+    path.forEach((v, i) => tp.set(g.pos(v), i * 3));
+    this.trail.geometry.dispose();
+    this.trail.geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(tp, 3));
+    this.trail.visible = path.length > 1;
+    this.routeStops.material.size = 9 * this.game.renderer.getPixelRatio();
     this.range = s.warpRange;
     this.hereMarker.position.fromArray(here);
     this.rangeRing.position.fromArray(here);
@@ -380,7 +490,11 @@ export class GalaxyMap {
     }
     this.hover = i;
     this.hoverEl.classList.add('show');
-    this.hoverEl.style.transform = `translate(${Math.round(x + 16)}px, ${Math.round(y + 12)}px)`;
+    // flip to the other side of the cursor near the right and bottom edges
+    const w = this.hoverEl.offsetWidth, h = this.hoverEl.offsetHeight;
+    const hx = x + 16 + w > this.game.viewW - 8 ? x - 16 - w : x + 16;
+    const hy = y + 12 + h > this.game.viewH - 8 ? y - 12 - h : y + 12;
+    this.hoverEl.style.transform = `translate(${Math.round(hx)}px, ${Math.round(hy)}px)`;
   }
 
   select(i) {
@@ -395,9 +509,31 @@ export class GalaxyMap {
     }
     this.selMarker.visible = true;
     this.selMarker.position.fromArray(g.pos(i));
-    this.route.visible = true;
+    this.plan = null;
+    if (i !== st.systemIndex) {
+      const s = stats(st);
+      this.plan = planRoute(g, st.systemIndex, i, s.warpRange, s.warpClasses);
+    }
+    const multi = this.plan && this.plan.length > 2;
+    this.route.visible = !multi && i !== st.systemIndex;
     this.routeGeo.setFromPoints([new THREE.Vector3().fromArray(g.pos(st.systemIndex)), new THREE.Vector3().fromArray(g.pos(i))]);
+    this.routePath.visible = this.routeStops.visible = !!multi;
+    if (multi) {
+      const arr = this.routePathGeo.attributes.position.array;
+      const n = Math.min(64, this.plan.length);
+      for (let k = 0; k < n; k++) arr.set(g.pos(this.plan[k]), k * 3);
+      this.routePathGeo.setDrawRange(0, n);
+      this.routePathGeo.attributes.position.needsUpdate = true;
+    }
+    // remember it so it's still there after each jump along the way
+    st.route = multi ? i : null;
     this.renderInfo();
+  }
+
+  // the next star to warp to toward the selection
+  nextStop() {
+    if (this.plan && this.plan.length > 1) return this.plan[1];
+    return this.selected;
   }
 
   // err replaces the usual reason, for a jump that failed at the last check
@@ -423,12 +559,27 @@ export class GalaxyMap {
       let why = err || '';
       if (!why) {
         if (!allowed) why = `Your drive cannot hold ${cls.label.toLowerCase()}s yet.`;
-        else if (!inRange) why = `Out of range (${Math.round(s.warpRange)} ly).`;
+        else if (!inRange) why = this.plan ? '' : `No route within ${Math.round(s.warpRange)} ly jumps from here.`;
         else if (st.warpCells < 1) why = 'You need a Warp Cell. Craft one from Hydrogel and Ferrite.';
         else if (blocker) why = blocker;
       }
       const types = sys.planets.map((p) => p.typeLabel);
       const summary = [...new Set(types)].slice(0, 5).join(', ');
+      const jumps = this.plan ? this.plan.length - 1 : 0;
+      if (jumps > 1 && !err) {
+        // out of direct range but reachable: the button takes the next hop
+        const next = g.info(this.plan[1]);
+        why = st.warpCells < 1 ? 'You need a Warp Cell. Craft one from Hydrogel and Ferrite.' : blocker || '';
+        const cells = st.warpCells >= jumps ? '' : ` You have ${st.warpCells}.`;
+        html += `<div class="gi-name" style="--c:${cls.color}">${info.name}${isGoal ? ' <span class="gi-goal">Signal</span>' : ''}</div>
+          <div class="gi-row">${cls.label} · ${Math.round(dist)} ly away${visited ? ' · Visited' : ''}</div>
+          <div class="gi-row">${sys.planets.length} bodies: ${summary}</div>
+          <div class="gi-route">Route: <b>${jumps} jumps</b>, needs ${jumps} Warp Cells.${cells}</div>
+          ${why ? `<div class="gi-why">${why}</div>` : ''}
+          <button class="btn primary" data-act="warp" ${why ? 'disabled' : ''}>Warp to ${next.name} (1 of ${jumps})</button>`;
+        this.info.innerHTML = html + this.infoTail(st, here, blocker);
+        return;
+      }
       html += `<div class="gi-name" style="--c:${cls.color}">${info.name}${isGoal ? ' <span class="gi-goal">Signal</span>' : ''}</div>
         <div class="gi-row">${cls.label} · ${Math.round(dist)} ly away${visited ? ' · Visited' : ''}</div>
         <div class="gi-row">${sys.planets.length} bodies: ${summary}</div>
@@ -438,13 +589,18 @@ export class GalaxyMap {
     } else {
       html += `<div class="gi-hint">Click a star to plot a jump. Bright stars are in range.</div>`;
     }
+    this.info.innerHTML = html + this.infoTail(st, here, blocker);
+  }
+
+  infoTail(st, here, blocker) {
+    let html = '';
     if ((st.story.stage === 'core' || st.story.stage === 'end') && here !== CORE_INDEX) {
       const ready = st.story.flags.lens && st.warpCells >= 1;
       const note = ready && blocker ? `<div class="gi-why">${blocker}</div>` : '';
       html += `<div class="gi-core"><b>Core Jump</b><div>Uses the Harmonic Lens and one Warp Cell.</div>${note}<button class="btn primary" data-act="core" ${ready && !blocker ? '' : 'disabled'}>Jump to the core</button></div>`;
     }
     html += `<div class="gi-cells">${st.warpCells} Warp Cell${st.warpCells === 1 ? '' : 's'} · Range ${Math.round(stats(st).warpRange)} ly</div>`;
-    this.info.innerHTML = html;
+    return html;
   }
 
   render(dt, pipeline) {

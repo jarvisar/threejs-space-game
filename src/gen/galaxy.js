@@ -74,25 +74,46 @@ export class Galaxy {
     }
   }
 
-  // uniform grid for neighbor queries
+  // Uniform grids for neighbor queries. The 40 ly one is built up front,
+  // coarser ones on first use, so a 300 ly query scans ~125 cells instead of
+  // thousands.
   buildGrid() {
     this.cell = 40;
-    this.grid = new Map();
+    this.grids = new Map();
+    this.grid = this.gridFor(40);
+  }
+
+  gridFor(cell) {
+    let grid = this.grids.get(cell);
+    if (grid) return grid;
+    grid = new Map();
+    const P = this.positions;
     for (let i = 0; i < this.count; i++) {
-      const k = this.key(this.positions[i * 3], this.positions[i * 3 + 1], this.positions[i * 3 + 2]);
-      let arr = this.grid.get(k);
-      if (!arr) this.grid.set(k, (arr = []));
+      const k = this.cellKey(Math.floor(P[i * 3] / cell), Math.floor(P[i * 3 + 1] / cell), Math.floor(P[i * 3 + 2] / cell));
+      let arr = grid.get(k);
+      if (!arr) grid.set(k, (arr = []));
       arr.push(i);
     }
+    this.grids.set(cell, grid);
+    return grid;
   }
 
   key(x, y, z) {
-    return `${Math.floor(x / this.cell)},${Math.floor(y / this.cell)},${Math.floor(z / this.cell)}`;
+    return this.cellKey(Math.floor(x / this.cell), Math.floor(y / this.cell), Math.floor(z / this.cell));
+  }
+
+  // numeric so route planning doesn't build a string per cell lookup. Cells
+  // span at most -27..27 on each axis, 128 per axis leaves plenty of room.
+  cellKey(gx, gy, gz) {
+    return ((gx + 64) * 128 + (gy + 64)) * 128 + (gz + 64);
   }
 
   starsWithin(x, y, z, radius) {
     const out = [];
-    const c = this.cell;
+    let c = 40;
+    while (c * 2 < radius) c *= 2;
+    const grid = this.gridFor(c);
+    const P = this.positions;
     const r2 = radius * radius;
     const x0 = Math.floor((x - radius) / c), x1 = Math.floor((x + radius) / c);
     const y0 = Math.floor((y - radius) / c), y1 = Math.floor((y + radius) / c);
@@ -100,10 +121,10 @@ export class Galaxy {
     for (let gx = x0; gx <= x1; gx++)
       for (let gy = y0; gy <= y1; gy++)
         for (let gz = z0; gz <= z1; gz++) {
-          const arr = this.grid.get(`${gx},${gy},${gz}`);
+          const arr = grid.get(this.cellKey(gx, gy, gz));
           if (!arr) continue;
           for (const i of arr) {
-            const dx = this.positions[i * 3] - x, dy = this.positions[i * 3 + 1] - y, dz = this.positions[i * 3 + 2] - z;
+            const dx = P[i * 3] - x, dy = P[i * 3 + 1] - y, dz = P[i * 3 + 2] - z;
             if (dx * dx + dy * dy + dz * dz <= r2) out.push(i);
           }
         }

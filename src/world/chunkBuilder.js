@@ -25,13 +25,15 @@ export function buildChunkIndex(N) {
       const b = a + 1;
       const c = a + N;
       const d = c + 1;
-      // alternate the diagonal so slopes don't all shade in one direction
+      // alternate the diagonal so slopes don't all shade in one direction.
+      // The terrain shader takes per face color from the first vertex, so the
+      // two halves of a quad have to start on different corners.
       if ((i + j) & 1) {
         idx[k++] = a; idx[k++] = b; idx[k++] = d;
-        idx[k++] = a; idx[k++] = d; idx[k++] = c;
+        idx[k++] = c; idx[k++] = a; idx[k++] = d;
       } else {
         idx[k++] = a; idx[k++] = b; idx[k++] = c;
-        idx[k++] = b; idx[k++] = d; idx[k++] = c;
+        idx[k++] = d; idx[k++] = c; idx[k++] = b;
       }
     }
   }

@@ -224,6 +224,11 @@ function jitterHex(rng, hex, amount) {
   return '#' + ((1 << 24) | (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b)).toString(16).slice(1);
 }
 
+// How far each palette entry gets pulled toward a mid lightness. The look is
+// soft and bright, so dark ground (volcanic, dead) is lifted enough to still
+// show its shape. Water, glow and cloud colors are left alone.
+const LIFT = { sand: 0.2, low: 0.24, mid: 0.24, high: 0.22, cliff: 0.26, peak: 0.08, veg: 0.18, veg2: 0.18, deep: 0.15, leaf: 0.14, trunk: 0.18 };
+
 export function buildPalette(rng, type) {
   const base = rng.pick(type.palettes);
   const p = {};
@@ -232,7 +237,41 @@ export function buildPalette(rng, type) {
     else if (Array.isArray(v) && typeof v[0] === 'string') p[k] = v.map((c) => jitterHex(rng, c, 0.1));
     else p[k] = Array.isArray(v) ? v.map((x) => x * rng.range(0.92, 1.08)) : v;
   }
+  for (const [k, lift] of Object.entries(LIFT)) {
+    if (typeof p[k] === 'string') p[k] = pastel(p[k], lift);
+    else if (Array.isArray(p[k])) p[k] = p[k].map((c) => pastel(c, lift));
+  }
   return p;
+}
+
+// lighten darks toward 0.6 lightness and ease off the loudest saturation
+function pastel(hex, lift) {
+  const c = parseInt(hex.replace('#', '').padEnd(6, hex.slice(-1)), 16);
+  const r = ((c >> 16) & 255) / 255, g = ((c >> 8) & 255) / 255, b = (c & 255) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  let l = (max + min) / 2;
+  const d = max - min;
+  if (d > 1e-6) {
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h /= 6;
+  }
+  l += (0.6 - l) * lift;
+  s = Math.min(1, s > 0.75 ? 0.75 + (s - 0.75) * 0.5 : s);
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const pp = 2 * l - q;
+  const f = (t) => {
+    t = (t + 1) % 1;
+    if (t < 1 / 6) return pp + (q - pp) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return pp + (q - pp) * (2 / 3 - t) * 6;
+    return pp;
+  };
+  const to = (x) => Math.round(Math.min(1, Math.max(0, x)) * 255);
+  return '#' + ((1 << 24) | (to(f(h + 1 / 3)) << 16) | (to(f(h)) << 8) | to(f(h - 1 / 3))).toString(16).slice(1);
 }
 
 export function buildTerrain(rng, type, radius, seed) {

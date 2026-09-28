@@ -1,4 +1,5 @@
 import { el, setText } from './dom.js';
+import { swatchStyle } from '../game/facts.js';
 
 // DOM overlay for everything shown during play. The game pushes plain values
 // in each frame and this only touches the DOM when something changed.
@@ -30,6 +31,7 @@ export class HUD {
     this.locSystem = el('div', 'loc-system', this.loc);
     this.locBody = el('div', 'loc-body', this.loc);
     this.locSub = el('div', 'loc-sub', this.loc);
+    this.locRoute = el('div', 'loc-route', this.loc);
     this.obj = el('div', 'objective', tl);
     this.objTitle = el('div', 'obj-title', this.obj);
     this.objText = el('div', 'obj-text', this.obj);
@@ -79,12 +81,14 @@ export class HUD {
     this.jetBar = el('div', 'bar jet', jr);
     this.jetFill = el('div', 'bar-fill', this.jetBar);
 
+    this.card = el('div', 'dcard', this.root);
     this.feed = el('div', 'feed', this.root);
     this.hint = el('div', 'hint', this.root);
     this.vignette = el('div', 'hazard-vignette', this.root);
     // outside the HUD root, which photo mode hides
-    const keys = [['WASD', 'Fly'], ['R</kbd><kbd>F', 'Up, down'], ['Q</kbd><kbd>E', 'Roll'], ['Shift', 'Fast'], ['Wheel', 'Speed'], ['P', 'Exit']];
+    const keys = [['WASD', 'Fly'], ['R</kbd><kbd>F', 'Up, down'], ['Q</kbd><kbd>E', 'Roll'], ['Shift', 'Fast'], ['Wheel', 'Speed'], ['Z</kbd><kbd>X', 'Time of day'], ['1</kbd><kbd>2', 'Zoom'], ['B', 'Focus blur'], ['V', 'Filter'], ['H', 'Hide ship'], ['Enter', 'Save'], ['P', 'Exit']];
     this.photoHint = el('div', 'photo-hint', root, `<b>Photo mode</b>${keys.map(([k, d]) => `<span><kbd>${k}</kbd>${d}</span>`).join('')}`);
+    this.photoStatusEl = el('div', 'photo-status', root);
     this.mode = null;
     this.visible = true;
     this.bannerQueue = [];
@@ -104,6 +108,14 @@ export class HUD {
     if (v) this._photoT = setTimeout(() => this.photoHint.classList.remove('show'), 6000);
   }
 
+  // short readout when a photo setting changes, fades so it stays out of shots
+  photoStatus(text) {
+    setText(this.photoStatusEl, text);
+    this.photoStatusEl.classList.add('show');
+    clearTimeout(this._photoS);
+    this._photoS = setTimeout(() => this.photoStatusEl.classList.remove('show'), 1400);
+  }
+
   setMode(mode) {
     if (this.mode === mode) return;
     this.mode = mode;
@@ -114,6 +126,13 @@ export class HUD {
     setText(this.locSystem, system || '');
     setText(this.locBody, body || '');
     setText(this.locSub, sub || '');
+  }
+
+  setRoute(html) {
+    if (this.locRoute._t === html) return;
+    this.locRoute._t = html;
+    this.locRoute.innerHTML = html || '';
+    this.locRoute.style.display = html ? '' : 'none';
   }
 
   setObjective(title, text) {
@@ -205,6 +224,18 @@ export class HUD {
       this.bannerEl.classList.remove('show');
       this.nextBanner();
     }, BANNER_MS);
+  }
+
+  // facts from game/facts.js, kicker is the small line on top
+  showCard(f, kicker) {
+    const rows = f.rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+    const tags = f.tags.length ? `<div class="dcard-tags">${f.tags.map((t) => `<i>${t}</i>`).join('')}</div>` : '';
+    this.card.innerHTML = `<div class="dcard-kicker">${kicker}</div><div class="dcard-head"><div class="dcard-orb" style="${swatchStyle(f.colors, f.gas)}"></div><div><div class="dcard-name">${f.name}</div><div class="dcard-type">${f.type}</div></div></div><div class="dcard-rows">${rows}</div>${tags}`;
+    this.card.classList.remove('show');
+    void this.card.offsetWidth;
+    this.card.classList.add('show');
+    clearTimeout(this._cardT);
+    this._cardT = setTimeout(() => this.card.classList.remove('show'), 9000);
   }
 
   clearBanners() {

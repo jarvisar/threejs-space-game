@@ -5,7 +5,8 @@ import { Effects } from '../render/effects.js';
 import { WarpTunnel } from '../render/warp.js';
 import { SpaceDust } from '../render/spaceDust.js';
 import { AsteroidField } from '../world/asteroids.js';
-import { buildWarmup, disposeWarmup } from '../render/warmup.js';
+import { buildWarmup, prepareView, afterFrames } from '../render/warmup.js';
+import { loader } from '../ui/loader.js';
 import { Galaxy, STAR_CLASSES, CORE_INDEX } from '../gen/galaxy.js';
 import { generateSystem, generateCoreSystem } from '../gen/system.js';
 import { StarSystem } from '../world/starSystem.js';
@@ -14,6 +15,10 @@ import { Sky } from '../world/sky.js';
 import { Weather } from '../world/weather.js';
 import { WorkerPool } from '../world/workerPool.js';
 import { POI_INFO } from '../world/pois.js';
+import { WONDERS } from '../world/wonders.js';
+import { Meteors } from '../world/meteors.js';
+import { worldFacts, worldColors } from './facts.js';
+import { planRoute } from '../gen/route.js';
 import { faunaSpecies } from '../world/fauna.js';
 import { planetSpecies } from '../gen/flora.js';
 import { Input } from '../core/input.js';
@@ -30,7 +35,7 @@ import { Surface } from './surface.js';
 import { Story } from './story.js';
 import { stats, level, UPGRADES, RECIPES } from './upgrades.js';
 import { RESOURCES } from './resources.js';
-import { RESONANCES, ENDING, echoText } from './lore.js';
+import { RESONANCES, ENDING, echoText, wreckLog } from './lore.js';
 import { DebugCam } from './debugCam.js';
 import { RNG } from '../core/rng.js';
 import { smoothstep } from '../core/math.js';
@@ -40,6 +45,18 @@ const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 
 const SETTINGS_KEY = 'starsong-settings';
+
+// photo mode looks, cycled with V. The first one is the normal game grade.
+const FILTERS = [
+  { name: 'Natural', sat: 1.1, vig: 0.35, bloom: 0.9, grain: 0.012, tint: [1, 1, 1], contrast: 1, lift: 0 },
+  { name: 'Warm', sat: 1.15, vig: 0.4, bloom: 1.0, grain: 0.012, tint: [1.07, 1.0, 0.88], contrast: 1.03, lift: 0.01 },
+  { name: 'Cool', sat: 1.05, vig: 0.4, bloom: 0.9, grain: 0.012, tint: [0.9, 0.99, 1.1], contrast: 1.02, lift: 0.01 },
+  { name: 'Vivid', sat: 1.5, vig: 0.3, bloom: 1.0, grain: 0.01, tint: [1, 1, 1], contrast: 1.12, lift: 0 },
+  { name: 'Dreamy', sat: 1.2, vig: 0.25, bloom: 1.9, grain: 0.01, tint: [1.03, 0.98, 1.05], contrast: 0.88, lift: 0.05 },
+  { name: 'Film', sat: 0.88, vig: 0.6, bloom: 1.0, grain: 0.035, tint: [1.03, 1.0, 0.94], contrast: 1.08, lift: 0.035 },
+  { name: 'Noir', sat: 0, vig: 0.75, bloom: 0.8, grain: 0.04, tint: [1, 1, 1], contrast: 1.3, lift: 0.02 },
+];
+const BLUR_NAMES = ['Focus blur off', 'Focus blur soft', 'Focus blur strong'];
 const HAZARD_LABEL = { heat: 'Heat', cold: 'Cold', toxic: 'Toxic', radiation: 'Radiation', none: 'Shield' };
 const HAZARD_COLOR = { heat: '255,110,40', cold: '90,170,255', toxic: '150,255,60', radiation: '230,255,60' };
 
@@ -65,6 +82,11 @@ export class Game {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.autoClear = false;
+    // Faceted terrain uses flat varyings. D3D takes them from the first vertex
+    // and ANGLE emulates the GL default (last vertex) with a geometry shader,
+    // which is slow. Without the extension it still works, just slower.
+    const pv = this.renderer.getContext().getExtension('WEBGL_provoking_vertex');
+    if (pv) pv.provokingVertexWEBGL(pv.FIRST_VERTEX_CONVENTION_WEBGL);
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
@@ -114,6 +136,7 @@ export class Game {
     this.tunnel = new WarpTunnel(this.camera);
     this.weather = new Weather();
     this.dust = new SpaceDust(this.scene);
+    this.meteors = new Meteors(this.scene);
     this.fields = [];
     this.ship = null;
     this.warp = null;
@@ -149,7 +172,7 @@ export class Game {
   // ---------------------------------------------------------------- settings
 
   loadSettings() {
-    const d = { sensitivity: 1, invertY: false, renderScale: 1, shadows: true, volume: 0.8, music: 0.55 };
+    const d = { sensitivity: 1, invertY: false, renderScale: 1, shadows: true, ao: true, dof: true, volume: 0.8, music: 0.55 };
     try {
       return Object.assign(d, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'));
     } catch {
@@ -212,11 +235,14 @@ export class Game {
     this.menuOpen = 'title';
   }
 
+  // resolves when the fade starts lifting
   startFromTitle(kind, seed) {
+    // a second click while the first one is still loading
+    if (this.loadingGame) return this.loadingGame;
     this.audio.init();
     this.audio.click();
     this.menus.setFade(1);
-    setTimeout(() => {
+    this.loadingGame = new Promise((resolve) => setTimeout(() => {
       if (kind === 'continue') {
         const s = GameState.load();
         if (s) {
@@ -238,25 +264,31 @@ export class Game {
       this.hud.setVisible(true);
       this.input.lock();
       this.onStage(this.state.story.stage, true);
-      this.warmupShaders();
-      setTimeout(() => this.menus.setFade(0), 400);
-    }, 650);
+      // Stay on black until the shaders and the ground around the player are
+      // ready. Drawing earlier compiles on the main thread and the game
+      // fades in on a stutter with terrain popping in.
+      this.holdRender = true;
+      loader.showMini('Loading');
+      prepareView(this, { extra: this.warmupGroup(), onProgress: (p, label) => loader.progress(p, label), terrainMs: 5000 }).catch((err) => console.error(err)).then(async () => {
+        this.holdRender = false;
+        // the first frames upload the new geometry, keep those behind the fade too
+        await afterFrames(2);
+        loader.hide();
+        loader.showView();
+        this.menus.setFade(0);
+        this.loadingGame = null;
+        resolve();
+      });
+    }, 650));
+    return this.loadingGame;
   }
 
-  // compile shaders for things that only appear mid-game while the screen is black
-  warmupShaders() {
-    if (this.warmedUp) return;
-    this.warmedUp = true;
-    const g = buildWarmup();
-    g.position.set(0, 0, -4);
-    this.camera.add(g);
-    // compile against the HDR target, programs built for the canvas use a
-    // different output color space and would be compiled again anyway
-    this.renderer.setRenderTarget(this.pipeline.rtScene);
-    this.renderer.compile(this.scene, this.camera);
-    this.renderer.setRenderTarget(null);
-    // leave it for a few frames so the shadow depth variants compile too
-    this.warm = { group: g, frames: 4 };
+  // Stand-ins for things that only show up mid-game (flora, creatures, POIs),
+  // compiled with the rest of the view. Never drawn and never disposed,
+  // disposing would drop their programs too.
+  warmupGroup() {
+    if (!this.warm) this.warm = buildWarmup();
+    return this.warm;
   }
 
   quitToTitle() {
@@ -299,6 +331,7 @@ export class Game {
   }
 
   loadSystem(index) {
+    this.cometSeen = false;
     this.surface.release();
     this.effects.clear();
     this.weather.setPlanet(null);
@@ -336,10 +369,13 @@ export class Game {
     if (arrival === 'spawn') this.spawnOnPlanet(this.system.bodies[0]);
     else if (arrival === 'load' && this.state.player) this.restorePlayer(this.state.player);
     else this.arriveFromWarp();
+    if (this.state.route === index) this.state.route = null;
+    this.refreshRoute();
     if (index >= 0) {
       const first = this.state.markVisited(index);
       if (first && arrival !== 'spawn') this.addData(25, 'New system');
       this.hud.banner(this.systemDef.name, `${STAR_CLASSES[this.systemDef.cls].label}${first && arrival !== 'spawn' ? ' · New system' : ''}`);
+      if (arrival === 'warp') this.hud.showCard(this.systemFacts(), first ? 'New system' : 'Arrived');
     }
     this.lastSave = this.time;
   }
@@ -387,7 +423,9 @@ export class Game {
     this.ship.placeLanded(planet, best, heading.clone().negate());
     // face the ship with the sunrise off to one side
     const toShip = this.ship.pos.clone().sub(standDir.clone().multiplyScalar(planet.radius)).projectOnPlane(standDir).normalize();
-    this.walker.place(planet, standDir, toShip.lerp(heading, 0.6).normalize());
+    const look = toShip.lerp(heading, 0.6).normalize();
+    this.walker.place(planet, standDir, look);
+    this.state.story.flags.spawn = { dir: standDir.toArray(), look: look.toArray() };
     this.setMode('foot');
   }
 
@@ -517,6 +555,7 @@ export class Game {
     if (this.menuOpen === 'map') {
       this.map.hide();
       this.hud.setVisible(true);
+      this.refreshRoute();
     }
     this.menus.close();
     this.menuOpen = null;
@@ -627,15 +666,73 @@ export class Game {
     }
   }
 
+  // The start planet puts its first wonder a few hundred meters out in the
+  // opening view, so there's somewhere to head for. Older saves have no spawn
+  // record and just get the usual random wonders.
+  wonderHint(planet) {
+    const sp = this.state.story.flags.spawn;
+    if (!sp || !this.systemDef.isStart || planet.index !== 0) return null;
+    const up = new THREE.Vector3().fromArray(sp.dir);
+    const look = new THREE.Vector3().fromArray(sp.look).projectOnPlane(up).normalize();
+    const side = new THREE.Vector3().crossVectors(look, up);
+    // spots in the opening view, best first
+    const dirs = [];
+    for (const d of [330, 400, 280, 480, 560, 650]) {
+      for (const s of [0, 50, -50, 110, -110]) dirs.push(up.clone().multiplyScalar(planet.radius).addScaledVector(look, d).addScaledVector(side, s).normalize());
+    }
+    return { kind: 'tree', dirs };
+  }
+
+  discoverWonder(poi, planet) {
+    const st = this.state;
+    if (!st.wonders) st.wonders = [];
+    st.wonders.push({ name: poi.name, kind: poi.kind, planet: planet.def.name, system: this.systemDef.name });
+    const world = st.discoveries[planet.def.id];
+    if (world) world.wonders = (world.wonders || 0) + 1;
+    this.hud.banner(poi.name, `${WONDERS[poi.kind].label} discovered`);
+    this.addData(50, 'Landmark');
+    this.audio.chorus();
+    this.saveSoon = true;
+  }
+
   discoverBody(body) {
     const d = body.def;
     if (this.state.discoveries[d.id]) return;
     // how many plants and creatures there are to catalogue, for the journal
     const life = d.kind === 'rocky' ? planetSpecies(d).filter((s) => s.plant).length + faunaSpecies(d).length : 0;
-    this.state.discoveries[d.id] = { name: d.name, type: d.typeLabel, system: this.systemDef.name, life, found: 0 };
+    this.state.discoveries[d.id] = { name: d.name, type: d.typeLabel, system: this.systemDef.name, life, found: 0, colors: worldColors(d), gas: d.kind === 'gas', moon: !!d.isMoon };
     this.hud.banner(d.name, `${d.typeLabel}${d.isMoon ? ' moon' : ''} discovered`);
+    // the surface can come up before the discovery when flying in low
+    if (this.surface.planet === body && this.surface.pois) this.state.discoveries[d.id].wonderTotal = this.surface.pois.wonders.length;
+    this.hud.showCard(this.bodyFacts(body), 'New world discovered');
     this.addData(15, 'New world');
     this.audio.discovery();
+  }
+
+  // the arrival card: every world in the system and what's been explored
+  systemFacts() {
+    const sys = this.systemDef;
+    const cls = STAR_CLASSES[sys.cls];
+    const rows = this.system.bodies.filter((b) => !b.def.isMoon).map((b) => {
+      const moons = this.system.bodies.filter((m) => m.def.isMoon && m.def.parent === b.index).length;
+      const seen = this.state.discoveries[b.def.id] ? '' : ' · new';
+      return [b.def.name, `${b.def.typeLabel}${moons ? ` +${moons}` : ''}${seen}`];
+    });
+    const tags = [];
+    if (sys.comet) tags.push('Comet');
+    if (this.fields.length) tags.push(`${this.fields.length} asteroid field${this.fields.length > 1 ? 's' : ''}`);
+    if (sys.resonance >= 0) tags.push('Chorus signal');
+    return { name: sys.name, type: sys.starLabel || cls.label, colors: [cls.color, cls.color, '#3a2a18'], gas: false, rows, tags };
+  }
+
+  // worldFacts plus things only the system knows, like how many moons
+  bodyFacts(body) {
+    const f = worldFacts(body);
+    const moons = this.system.bodies.filter((b) => b.def.isMoon && b.def.parent === body.index).length;
+    if (moons) f.tags.push(`${moons} moon${moons > 1 ? 's' : ''}`);
+    const w = this.state.discoveries[body.def.id];
+    if (w && w.wonderTotal) f.rows.push(['Landmarks', `${w.wonders || 0} of ${w.wonderTotal} found`]);
+    return f;
   }
 
   onStage(stage, silent) {
@@ -703,7 +800,8 @@ export class Game {
       this.rig.frame = null;
       this.rig.worldPos.copy(this.debugCam.pos);
       this.rig.worldQuat.copy(this.debugCam.quat);
-      this.rig.fov = 60;
+      this.rig.fov = this.photoFov || 60;
+      this.updatePhoto(dt);
     } else if (this.warp) {
       this.updateWarp(dt);
     } else if (!this.paused) {
@@ -733,6 +831,8 @@ export class Game {
     const wv = this.ship.frame ? _v.copy(this.ship.vel).applyQuaternion(this.ship.frame.quat) : this.ship.vel;
     this.dust.update(camWorld, wv, dustAmt);
     this.weather.update(dt, this.surface.planet, this.rig.frame === this.surface.planet ? this.rig.localPos : null, this.stormK || 0);
+    const onPlanet = this.screen === 'play' && !this.warp && this.rig.frame instanceof Planet && this.rig.frame.def.atmosphere ? this.rig.frame : null;
+    this.meteors.update(this.paused ? 0 : dt, onPlanet, onPlanet ? _v2.copy(this.rig.localPos).normalize() : null);
 
     this.camera.position.set(0, 0, 0);
     this.camera.quaternion.copy(this.rig.worldQuat);
@@ -748,16 +848,18 @@ export class Game {
     if (this.screen === 'play') this.updateHud(dt);
     this.audio.update(this.audioParams(dt));
     this.updateMood();
+    this.updateDof(dt);
+    this.updateAO(dt);
     this.profMark('hud');
     this.pipeline.setAtmospheres(this.system.atmosphereList());
-    this.pipeline.render(this.time, this.shadowsActive);
+    // held while prepareView() compiles shaders and waits for terrain
+    if (!this.holdRender) this.pipeline.render(this.time, this.shadowsActive, dt);
+    if (this.snapNext) {
+      this.snapNext = false;
+      this.savePhoto();
+    }
     this.profMark('render');
 
-    if (this.warm && --this.warm.frames <= 0) {
-      this.camera.remove(this.warm.group);
-      disposeWarmup(this.warm.group);
-      this.warm = null;
-    }
     this.checkEnding();
     if (this.screen === 'play' && !this.paused && !this.warp) {
       if (this.frame % 20 === 0) this.flushGains();
@@ -811,6 +913,10 @@ export class Game {
     this.debugCam.quat.copy(this.rig.worldQuat);
     this.debugCam.speed = 12;
     this.paused = true;
+    this.photoFov = 60;
+    this.photoBlur = 0;
+    this.photoFilter = this.photoFilter || 0;
+    this.applyFilter(FILTERS[this.photoFilter]);
     this.hud.clearMessage();
     this.hud.setVisible(false);
     this.hud.showPhotoHint(true);
@@ -820,10 +926,87 @@ export class Game {
 
   exitPhoto() {
     this.photo = false;
+    this.applyFilter(FILTERS[0]);
+    this.ship.model.root.visible = true;
     this.hud.setVisible(true);
     this.hud.showPhotoHint(false);
     this.tool.setVisible(this.mode === 'foot');
     this.rig.transition = null;
+  }
+
+  applyFilter(f) {
+    const u = this.pipeline.finalUniforms;
+    u.uSaturation.value = f.sat;
+    u.uVignette.value = f.vig;
+    u.uBloom.value = f.bloom;
+    u.uGrain.value = f.grain;
+    u.uTint.value.fromArray(f.tint);
+    u.uContrast.value = f.contrast;
+    u.uLift.value = f.lift;
+  }
+
+  // Photo mode keys. The game is paused, so this reads raw key state like
+  // the free camera does.
+  updatePhoto(dt) {
+    const k = this.input.pressed;
+    const down = this.input.down;
+    const hud = this.hud;
+    const t = (down.has('KeyX') ? 1 : 0) - (down.has('KeyZ') ? 1 : 0);
+    if (t) {
+      this.shiftTimeOfDay(t * dt);
+      const f = this.system.focus;
+      if (f instanceof Planet) hud.photoStatus(`Time ${this.localTime(f, f.toLocal(this.debugCam.pos, new THREE.Vector3()))}`);
+    }
+    if (k.has('Digit1') || k.has('Digit2')) {
+      this.photoFov = Math.min(100, Math.max(12, this.photoFov * (k.has('Digit1') ? 0.8 : 1.25)));
+      hud.photoStatus(`Zoom ${Math.round(this.photoFov)}°`);
+    }
+    if (k.has('KeyB')) {
+      this.photoBlur = (this.photoBlur + 1) % 3;
+      hud.photoStatus(BLUR_NAMES[this.photoBlur]);
+    }
+    if (k.has('KeyV')) {
+      this.photoFilter = (this.photoFilter + 1) % FILTERS.length;
+      this.applyFilter(FILTERS[this.photoFilter]);
+      hud.photoStatus(FILTERS[this.photoFilter].name);
+    }
+    if (k.has('KeyH')) {
+      const m = this.ship.model.root;
+      m.visible = !m.visible;
+      hud.photoStatus(m.visible ? 'Ship shown' : 'Ship hidden');
+    }
+    if (k.has('Enter') || k.has('NumpadEnter')) this.snapNext = true;
+  }
+
+  // spins the nearest planet forward or back a bit of a day, carrying the
+  // camera along so the shot stays framed while the sun moves
+  shiftTimeOfDay(k) {
+    const f = this.system.focus;
+    if (!f) return;
+    const cam = this.debugCam;
+    const local = f.toLocal(cam.pos, new THREE.Vector3());
+    const lq = f.invQuat.clone().multiply(cam.quat);
+    this.state.worldTime += (k * (f.dayLength || 1200)) / 14;
+    this.system.updateRotations(this.state.worldTime);
+    f.toWorld(local, cam.pos);
+    cam.quat.copy(f.quat).multiply(lq);
+  }
+
+  // the canvas still holds this frame right after rendering it, so no
+  // preserveDrawingBuffer is needed
+  savePhoto() {
+    const body = this.system.focus;
+    const name = `starsong-${this.systemDef.name}${body ? '-' + body.def.name : ''}`.replace(/[^\w-]+/g, '-').toLowerCase();
+    this.renderer.domElement.toBlob((blob) => {
+      if (!blob) return;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${name}.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }, 'image/png');
+    this.audio.click();
+    this.hud.photoStatus('Saved');
   }
 
   updateLighting(camWorld, dt) {
@@ -878,7 +1061,9 @@ export class Game {
     }
     const camInv = this.rig.worldQuat;
     if (this.mode === 'foot') {
-      lamp.position.set(0.3, -0.2, 0).applyQuaternion(camInv);
+      // starts past the multitool's tip, from behind it the tool took the full
+      // beam at point blank and bloomed into a white blob
+      lamp.position.set(0, 0.05, -1.1).applyQuaternion(camInv);
       lamp.target.position.set(0, 0, -20).applyQuaternion(camInv);
       lamp.distance = 90;
       lamp.angle = 0.6;
@@ -896,6 +1081,39 @@ export class Game {
     }
     lamp.updateMatrixWorld();
     lamp.target.updateMatrixWorld();
+  }
+
+  // Autofocus under the crosshair. On foot it only softens what's well behind
+  // the focus point. In the ship it stays off, it would blur the planets
+  // you're flying toward.
+  updateDof(dt) {
+    const d = this.pipeline.dof;
+    let want = 0;
+    if (this.photo) {
+      // near and far blur around whatever is under the center of the frame
+      want = [0, 0.85, 1][this.photoBlur];
+      d.range.set(this.photoBlur === 2 ? 0.06 : 0.18, this.photoBlur === 2 ? 0.5 : 1.3, 1);
+      d.spread = this.photoBlur === 2 ? 2.8 : 1.8;
+      d.manualFocus = 0;
+    } else if (this.screen === 'play' && this.mode === 'foot' && !this.warp && this.settings.dof) {
+      want = 0.75;
+      d.range.set(1.2, 7, 0);
+      d.spread = 1.6;
+      d.manualFocus = 0;
+    }
+    d.amount += (want - d.amount) * Math.min(1, dt * 4);
+    if (d.amount < 0.002) d.amount = 0;
+  }
+
+  // AO only matters near the ground, from a few hundred meters up there's
+  // nothing it can resolve, so the passes are skipped entirely
+  updateAO(dt) {
+    let want = 0;
+    const f = this.system.focus;
+    if (this.settings.ao && f && f.heightAt && f.camDist - f.radius - f.maxH < 400) want = 1;
+    const p = this.pipeline;
+    p.aoAmount += (want - p.aoAmount) * Math.min(1, dt * 3);
+    if (p.aoAmount < 0.01 && want === 0) p.aoAmount = 0;
   }
 
   updateMood() {
@@ -1148,12 +1366,43 @@ export class Game {
     this.hud.scanPulse();
     const planet = this.surface.planet;
     if (!planet || !this.surface.pois) {
-      this.hud.message('Fly closer to a planet to scan it');
+      // out in space the scanner reads whatever world is under the reticle
+      const body = this.bodyUnderReticle();
+      if (body) this.hud.showCard(this.bodyFacts(body), this.state.discoveries[body.def.id] ? 'Scan' : 'Scan · Undiscovered');
+      else this.hud.message('Point at a planet to scan it');
       return;
     }
     const local = this.ship.pos;
-    const fresh = this.surface.pois.reveal(local, 4000, ['monolith', 'ruin', 'cache', 'beacon', 'deposit']);
+    const fresh = this.surface.pois.reveal(local, 4000, ['monolith', 'ruin', 'cache', 'beacon', 'deposit', 'wonder']);
     this.reportScan(fresh);
+  }
+
+  // jumps left on the route set in the galaxy map, for the HUD
+  refreshRoute() {
+    const st = this.state;
+    this.routeInfo = null;
+    if (st.route === null || st.route === undefined || !this.galaxy) return;
+    const s = stats(st);
+    const plan = planRoute(this.galaxy, st.systemIndex, st.route, s.warpRange, s.warpClasses);
+    if (plan && plan.length > 1) this.routeInfo = { name: this.galaxy.name(st.route), jumps: plan.length - 1, next: this.galaxy.name(plan[1]) };
+  }
+
+  // closest body to the center of the view, within about 12 degrees
+  bodyUnderReticle() {
+    const fwd = _v.set(0, 0, -1).applyQuaternion(this.rig.worldQuat);
+    let best = null;
+    let bestA = 0.21;
+    for (const b of this.system.bodies) {
+      const to = _v2.subVectors(b.position, this.rig.worldPos);
+      const d = to.length();
+      // angular size helps big planets that fill the view
+      const a = Math.acos(Math.min(1, to.dot(fwd) / d)) - Math.asin(Math.min(1, b.radius / d));
+      if (a < bestA) {
+        bestA = a;
+        best = b;
+      }
+    }
+    return best;
   }
 
   reportScan(fresh) {
@@ -1309,6 +1558,24 @@ export class Game {
         this.audio.craft();
         break;
       }
+      case 'wonder': {
+        if (used) return this.hud.message('Nothing left aboard');
+        pois.markUsed(poi);
+        const text = wreckLog(poi.seed, poi.name, planet.def.name);
+        this.state.lore.push({ title: poi.name, text });
+        const rng = new RNG(poi.seed ^ 0x3e1);
+        this.gain(rng.pick(['ferrite', 'lumen', 'hydrogel']), 40 + rng.int(0, 30), true);
+        let extra = '';
+        if (rng.chance(0.6)) {
+          this.state.warpCells++;
+          extra = ' · +1 Warp Cell';
+        }
+        this.state.data += 80;
+        this.audio.chorus();
+        this.menus.showDialog(poi.name, text, `+80 Data${extra}`);
+        this.openDialog();
+        break;
+      }
       case 'beacon': {
         if (used) return this.hud.message('The beacon has nothing new');
         pois.markUsed(poi);
@@ -1417,6 +1684,21 @@ export class Game {
   // ---------------------------------------------------------------- discovery
 
   updateDiscovery() {
+    const comet = this.system.comet;
+    if (comet && this.mode === 'ship' && !this.cometSeen) {
+      const d = this.ship.worldPos(_v).distanceTo(comet.position);
+      if (d < 3500) {
+        this.cometSeen = true;
+        if (!this.state.wonders) this.state.wonders = [];
+        if (!this.state.wonders.some((w) => w.kind === 'comet' && w.name === comet.name && w.system === this.systemDef.name)) {
+          this.state.wonders.push({ name: comet.name, kind: 'comet', planet: this.systemDef.name, system: this.systemDef.name });
+          this.hud.banner(comet.name, 'Comet discovered');
+          this.addData(60, 'Comet');
+          this.audio.discovery();
+          this.saveSoon = true;
+        }
+      }
+    }
     const f = this.mode === 'foot' ? this.walker.frame : this.ship.frame;
     if (!f) return;
     // gas giants count once the ship is in their space, rocky worlds once inside the air
@@ -1581,12 +1863,15 @@ export class Game {
       if (d.hazard && d.hazard.type !== 'none' && d.kind === 'rocky') sub += ` · ${HAZARD_LABEL[d.hazard.type]} ${Math.round(d.hazard.level * 100)}%`;
       const found = this.state.discoveries[d.id];
       if (found && found.life) sub += ` · Life ${found.found || 0}/${found.life}`;
+      if (found && found.wonderTotal) sub += ` · Landmarks ${found.wonders || 0}/${found.wonderTotal}`;
       if (body instanceof Planet && frameBody) {
         const local = this.mode === 'foot' ? this.walker.pos : this.ship.pos;
         sub += ` · ${this.localTime(body, local)}`;
       }
     }
     hud.setLocation(`${sys.name} · ${sys.starLabel || cls.label}`, body ? body.def.name : 'Deep space', sub);
+    const r = this.routeInfo;
+    hud.setRoute(r ? `Route to <b>${r.name}</b> · ${r.jumps} jump${r.jumps > 1 ? 's' : ''} left · next ${r.next}` : null);
     const obj = this.story.objective();
     hud.setObjective(obj ? obj.title : null, obj ? obj.text : null);
 
@@ -1601,7 +1886,8 @@ export class Game {
       else if (s.boost > 0.2) mode = 'Boost';
       hud.updateFlight({ mode, speed: s.speed, alt: s.frame ? s.altitude : Infinity, throttle: s.throttle, energy: s.energy, pulse: s.pulse });
       let prompt = null;
-      if (s.state === 'landed') prompt = '<kbd>E</kbd>Exit ship &nbsp; <kbd>W</kbd>Take off';
+      // no take off prompt while the thrusters are still broken
+      if (s.state === 'landed') prompt = this.state.story.stage === 'repair' ? '<kbd>E</kbd>Exit ship' : '<kbd>E</kbd>Exit ship &nbsp; <kbd>W</kbd>Take off';
       else if (s.state === 'flying' && s.canLand() === null) prompt = '<kbd>E</kbd>Land';
       hud.prompt(prompt);
       if (s.state === 'flying') {
@@ -1640,7 +1926,14 @@ export class Game {
         const isGoal = this.state.story.stage === 'spire' && b.def.spire;
         // off-screen bodies only get an edge arrow when they matter
         const visible = !p.edge || isGoal || p.dist - b.radius < 40000;
-        markers.push({ id: `b${b.index}`, x: p.x, y: p.y, visible, edge: p.edge, label: b.def.name + (isGoal ? ' · Signal' : ''), sub: fmtDist(p.dist - b.radius), kind: isGoal ? 'signal' : 'body', color: isGoal ? '#e6d4ff' : b.def.kind === 'gas' ? '#ffd9a0' : '#cfe9ff' });
+        const known = this.state.discoveries[b.def.id];
+        markers.push({ id: `b${b.index}`, x: p.x, y: p.y, visible, edge: p.edge, label: b.def.name + (isGoal ? ' · Signal' : ''), sub: `${known ? '' : 'Unexplored · '}${fmtDist(p.dist - b.radius)}`, kind: isGoal ? 'signal' : 'body', color: isGoal ? '#e6d4ff' : b.def.kind === 'gas' ? '#ffd9a0' : '#cfe9ff' });
+      }
+      const comet = this.system.comet;
+      if (comet) {
+        const p = this.project(comet.position, tmp);
+        const seen = this.state.wonders && this.state.wonders.some((w) => w.kind === 'comet' && w.name === comet.name && w.system === sys.name);
+        if (p.dist > comet.radius * 6 && p.dist < 400000) markers.push({ id: 'comet', x: p.x, y: p.y, visible: !p.edge || p.dist < 120000, edge: p.edge, label: seen ? comet.name : 'Comet', sub: fmtDist(p.dist), kind: 'poi', color: '#bfe6ff' });
       }
       for (let i = 0; i < this.fields.length; i++) {
         const f = this.fields[i];
@@ -1656,11 +1949,14 @@ export class Game {
     if (this.surface.pois && frameBody === this.surface.planet) {
       const local = this.mode === 'foot' ? this.walker.pos : this.ship.pos;
       for (const poi of this.surface.pois.markers(local)) {
-        const wp = frameBody.toWorld(poi.pos.clone().addScaledVector(poi.dir, poi.type === 'spire' ? 30 : 3), new THREE.Vector3());
+        const lift = poi.type === 'spire' ? 30 : poi.type === 'wonder' ? (poi.height || 30) * 0.7 : 3;
+        const wp = frameBody.toWorld(poi.pos.clone().addScaledVector(poi.dir, lift), new THREE.Vector3());
         const p = this.project(wp, {});
-        if (p.dist > 6000 || p.dist < 6) continue;
+        const wonder = poi.type === 'wonder';
+        if (p.dist > (wonder ? 7500 : 6000) || p.dist < (wonder ? poi.reach * 0.8 : 6)) continue;
         const info = POI_INFO[poi.type];
-        const label = poi.type === 'deposit' ? `${RESOURCES[poi.res].name} Deposit` : info.label;
+        let label = poi.type === 'deposit' ? `${RESOURCES[poi.res].name} Deposit` : info.label;
+        if (wonder) label = this.surface.pois.isFound(poi) ? poi.name : 'Unknown landmark';
         markers.push({ id: `p${poi.id}`, x: p.x, y: p.y, visible: true, edge: p.edge, label, sub: fmtDist(p.dist), kind: poi.type === 'spire' ? 'signal' : 'poi', color: poi.type === 'deposit' ? RESOURCES[poi.res].color : info.color });
       }
     }

@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { atmosphereVertex, atmosphereFragment, MAX_ATMO_PLANETS } from './shaders/atmosphere.glsl.js';
 import { Bloom } from './bloom.js';
+import { DepthOfField, DOF_GLSL } from './dof.js';
+import { AmbientOcclusion } from './ao.js';
 
 export const LAYER_MAIN = 0;
 export const LAYER_POST = 1;
@@ -18,7 +20,15 @@ uniform float uFlash;
 uniform vec3 uFlashColor;
 uniform float uAberration;
 uniform float uGrain;
+uniform sampler2D tDof;
+uniform sampler2D tDepth;
+uniform sampler2D tFocus;
+uniform float uDof;
+uniform vec3 uTint;
+uniform float uContrast;
+uniform float uLift;
 varying vec2 vUv;
+${DOF_GLSL}
 
 vec3 RRTAndODTFit(vec3 v) {
   vec3 a = v * (v + 0.0245786) - 0.000090537;
@@ -47,6 +57,12 @@ void main() {
   } else {
     col = texture2D(tColor, uv).rgb;
   }
+  if (uDof > 0.0) {
+    float coc = dofCoc(dofDist(texture2D(tDepth, uv).x), texture2D(tFocus, vec2(0.5)).x) * uDof;
+    vec4 b = texture2D(tDof, uv);
+    // alpha is how much of the blurred neighborhood was out of focus itself
+    col = mix(col, b.rgb / max(b.a, 1e-4), coc * smoothstep(0.02, 0.2, b.a));
+  }
   col += texture2D(tBloom, uv).rgb * uBloom;
   col *= uExposure;
   col = aces(col);
@@ -56,6 +72,9 @@ void main() {
   float vig = smoothstep(0.85, 0.2, length(dc * vec2(1.0, 0.8)));
   col *= mix(1.0, vig, uVignette);
   col = toSRGB(col);
+  // photo mode grading, all neutral during play
+  col = clamp((col - 0.5) * uContrast + 0.5, 0.0, 1.0) * uTint;
+  col = mix(vec3(uLift), vec3(1.0), col);
   col += (rand(uv * 731.0 + fract(uTime * 7.0)) - 0.5) * uGrain;
   gl_FragColor = vec4(col, 1.0);
 }
@@ -68,6 +87,12 @@ export class Pipeline {
     this.camera = camera;
     this.samples = 4;
     this.bloom = new Bloom(6);
+    this.dof = new DepthOfField();
+    this.ao = new AmbientOcclusion();
+    // 0..1, how much AO gets applied. The pass is skipped at 0
+    this.aoAmount = 0;
+    this.white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+    this.white.needsUpdate = true;
 
     const planetSlots = [];
     for (let i = 0; i < MAX_ATMO_PLANETS; i++) planetSlots.push(Pipeline.emptySlot());
@@ -82,8 +107,15 @@ export class Pipeline {
       uTime: { value: 0 },
       uSunColor: { value: new THREE.Color(1, 1, 1) },
       uSunIntensity: { value: 15 },
-      uNightAmbient: { value: new THREE.Color(0.01, 0.013, 0.022) },
+      uNightAmbient: { value: new THREE.Color(0.018, 0.024, 0.042) },
       uDebug: { value: 0 },
+      tAO: { value: this.white },
+      uAOStrength: { value: 0 },
+      uAOPow: { value: 2.5 },
+      uViewSteps: { value: 14 },
+      uLightSteps: { value: 6 },
+      uAuroraSteps: { value: 12 },
+      uZero: { value: 0 },
     };
     this.atmoMaterial = new THREE.ShaderMaterial({
       uniforms: this.atmoUniforms,
@@ -111,6 +143,15 @@ export class Pipeline {
       uFlashColor: { value: new THREE.Color(1, 1, 1) },
       uAberration: { value: 0 },
       uGrain: { value: 0.012 },
+      tDof: { value: null },
+      tDepth: { value: null },
+      tFocus: { value: null },
+      uDof: { value: 0 },
+      uTint: { value: new THREE.Vector3(1, 1, 1) },
+      uContrast: { value: 1 },
+      uLift: { value: 0 },
+      uLogFar: this.dof.logFar,
+      uDofRange: this.dof.rangeU,
     };
     this.finalQuad = new FullScreenQuad(
       new THREE.ShaderMaterial({
@@ -148,7 +189,12 @@ export class Pipeline {
       cloudScale: 4,
       cloudSeed: 0,
       cloudSpeed: 0,
+      cloudFar: 1,
       ambient: new THREE.Color(),
+      auroraK: 0,
+      auroraLat: 0.8,
+      auroraC1: new THREE.Color(),
+      auroraC2: new THREE.Color(),
     };
   }
 
@@ -173,6 +219,8 @@ export class Pipeline {
       depthBuffer: true,
     });
     this.bloom.setSize(w, h);
+    this.dof.setSize(w, h);
+    this.ao.setSize(w, h);
   }
 
   // atmosphere slots in draw order (farthest first)
@@ -193,11 +241,12 @@ export class Pipeline {
     const bloomTex = this.bloom.render(r, this.rtPost.texture, this.width, this.height);
     this.finalUniforms.tColor.value = this.rtPost.texture;
     this.finalUniforms.tBloom.value = bloomTex;
+    this.finalUniforms.uDof.value = 0;
     r.setRenderTarget(null);
     this.finalQuad.render(r);
   }
 
-  render(time, shadowsDirty) {
+  render(time, shadowsDirty, dt = 0.016) {
     const r = this.renderer;
     const cam = this.camera;
     this.atmoUniforms.uTime.value = time;
@@ -229,6 +278,11 @@ export class Pipeline {
     r.render(this.scene, cam);
     lap('scene');
 
+    const a = this.atmoUniforms;
+    a.uAOStrength.value = this.aoAmount;
+    a.tAO.value = this.aoAmount > 0.001 ? this.ao.render(r, cam, this.rtScene.texture, this.rtScene.depthTexture) : this.white;
+    lap('ao');
+
     cam.layers.set(LAYER_POST);
     this.atmoUniforms.tScene.value = this.rtScene.texture;
     this.atmoUniforms.tDepth.value = this.rtScene.depthTexture;
@@ -238,9 +292,20 @@ export class Pipeline {
     cam.layers.set(LAYER_MAIN);
     lap('atmo');
 
+    const f = this.finalUniforms;
+    const depth = this.rtScene.depthTexture;
+    this.dof.updateFocus(r, depth, this.atmoUniforms.uLogFar.value, dt);
+    f.uDof.value = this.dof.amount;
+    if (this.dof.amount > 0.001) {
+      f.tDof.value = this.dof.render(r, this.rtPost.texture, depth);
+      f.tDepth.value = depth;
+      f.tFocus.value = this.dof.focusTexture;
+    }
+    lap('dof');
+
     const bloomTex = this.bloom.render(r, this.rtPost.texture, this.width, this.height);
-    this.finalUniforms.tColor.value = this.rtPost.texture;
-    this.finalUniforms.tBloom.value = bloomTex;
+    f.tColor.value = this.rtPost.texture;
+    f.tBloom.value = bloomTex;
     r.setRenderTarget(null);
     this.finalQuad.render(r);
     lap('post');

@@ -3,6 +3,9 @@ import { TerrainGenerator, faceDir } from '../gen/terrain.js';
 import { CHUNK_N, buildChunkIndex } from './chunkBuilder.js';
 import { createTerrainMaterial } from '../render/materials.js';
 import { Body } from './body.js';
+import { CloudPuffs } from './clouds.js';
+import { smoothstep } from '../core/math.js';
+import { RNG } from '../core/rng.js';
 
 let sharedIndex = null;
 function chunkIndex() {
@@ -46,6 +49,25 @@ export function fillAtmoCommon(body, s) {
   s.cloudCov = 0;
   s.camAlt = body.camDist - body.radius;
   s.solidR = body.radius * 0.995;
+}
+
+// Some worlds get auroras. Rolled from their own seed so the rest of the
+// planet's generation doesn't shift.
+const AURORA_CHANCE = { frozen: 0.9, exotic: 0.8, radioactive: 0.7, ocean: 0.6, lush: 0.5, toxic: 0.4, desert: 0.3, barren: 0.3, volcanic: 0.25 };
+const AURORA_COLORS = [
+  ['#3dff9a', '#c34dff'],
+  ['#4dffc3', '#4d7bff'],
+  ['#8cff4d', '#ff4da6'],
+  ['#4de1ff', '#b84dff'],
+  ['#ffd04d', '#ff4d6a'],
+];
+
+function auroraFor(def) {
+  if (!def.atmosphere) return null;
+  const rng = new RNG((def.seed ^ 0xa4a4) >>> 0);
+  if (!rng.chance(AURORA_CHANCE[def.type] || 0)) return null;
+  const pair = def.type === 'radioactive' ? AURORA_COLORS[2] : def.type === 'exotic' ? rng.pick([AURORA_COLORS[3], AURORA_COLORS[4]]) : rng.pick(AURORA_COLORS.slice(0, 4));
+  return { k: rng.range(1.6, 2.8), lat: rng.range(0.55, 0.75), c1: new THREE.Color(pair[0]), c2: new THREE.Color(pair[1]) };
 }
 
 // Surface normal from three height samples around a local direction
@@ -125,8 +147,9 @@ export class Planet extends Body {
     this.atmoRadius = def.atmosphere ? def.radius + def.atmosphere.height : def.radius + this.maxH;
     this.seaLevel = def.ocean ? def.radius : null;
 
-    // finest level where vertex spacing drops to about a meter
-    const spacingTarget = 1.0;
+    // finest level where vertex spacing drops to about 2 m. The terrain is flat
+    // shaded, so this is also the facet size underfoot.
+    const spacingTarget = 2.0;
     this.maxLevel = Math.max(4, Math.ceil(Math.log2((this.radius * Math.PI) / (2 * (CHUNK_N - 1) * spacingTarget))));
     this.finestLod = ((this.radius * Math.PI) / 2 / (1 << this.maxLevel) / (CHUNK_N - 1)) * 1.6;
 
@@ -140,6 +163,7 @@ export class Planet extends Body {
       scanRadius: { value: 0 },
     };
     this.computeAmbient();
+    this.aurora = auroraFor(def);
     this.material = createTerrainMaterial(def, this.uniforms);
     this.roots = [];
     for (let f = 0; f < 6; f++) this.roots.push(new Node(this, f, 0, 0, 0));
@@ -162,8 +186,10 @@ export class Planet extends Body {
       const g = new THREE.Color(def.palette.low);
       this.uniforms.ground.value.copy(g).multiplyScalar(0.25).add(new THREE.Color(0.06, 0.05, 0.04));
     } else {
-      this.uniforms.sky.value.setRGB(0.04, 0.045, 0.06);
-      this.uniforms.ground.value.setRGB(0.02, 0.02, 0.02);
+      // airless: starlight and light bounced off the ground, enough that
+      // shadows keep their shape instead of going black
+      this.uniforms.sky.value.setRGB(0.13, 0.14, 0.18);
+      this.uniforms.ground.value.copy(new THREE.Color(def.palette.low)).multiplyScalar(0.3).add(new THREE.Color(0.04, 0.04, 0.05));
     }
   }
 
@@ -190,6 +216,12 @@ export class Planet extends Body {
     this.horizonMax = Math.acos(rmin / (this.radius + this.maxH));
     this.camDir = _v.copy(this.camLocal).normalize().clone();
     for (const r of this.roots) this.updateNode(r);
+    // puffs only exist near the planet, from further out the atmosphere pass
+    // draws the same pattern
+    if (this.def.clouds) {
+      if (!this.clouds && D < this.radius * 10) this.clouds = new CloudPuffs(this);
+      if (this.clouds) this.clouds.update(now, this.stormK || 0);
+    }
   }
 
   isBeyondHorizon(node) {
@@ -348,9 +380,10 @@ export class Planet extends Body {
       s.oceanShallow.set(o.shallow);
       s.oceanDeep.set(o.deep);
     }
-    // storms thicken the haze and close up the cloud layer
+    // storms thicken the haze and close up the cloud layer. Kept moderate, at
+    // 5x the haze blotted out the sun and the ground went black.
     const storm = this.stormK || 0;
-    if (storm > 0) s.betaM *= 1 + storm * 5;
+    if (storm > 0) s.betaM *= 1 + storm * 1.6;
     const c = def.clouds;
     if (c) {
       s.cloudCov = Math.min(0.95, c.coverage + storm * 0.35);
@@ -359,14 +392,23 @@ export class Planet extends Body {
       s.cloudScale = c.scale;
       s.cloudSeed = c.seed;
       s.cloudSpeed = c.speed;
+      s.cloudFar = smoothstep(5.5, 8.5, this.camDist / this.radius);
     } else {
       s.cloudCov = 0;
     }
     s.ambient.copy(this.uniforms.sky.value);
+    const au = this.aurora;
+    s.auroraK = au ? au.k : 0;
+    if (au) {
+      s.auroraLat = au.lat;
+      s.auroraC1.copy(au.c1);
+      s.auroraC2.copy(au.c2);
+    }
   }
 
   dispose() {
     for (const r of this.roots) this.disposeSubtree(r);
+    if (this.clouds) this.clouds.dispose();
     this.material.dispose();
     if (this.rings) {
       this.rings.geometry.dispose();

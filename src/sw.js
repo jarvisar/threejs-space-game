@@ -4,9 +4,11 @@
 const CACHE = `starsong-${VERSION}`;
 
 self.addEventListener('install', (e) => {
-  // skip the HTTP cache, GitHub Pages sends max-age=600 and a stale index.html
-  // could get cached next to newer assets
-  const reqs = FILES.map((f) => new Request(f, { cache: 'reload' }));
+  // Revalidate instead of trusting the HTTP cache. GitHub Pages sends
+  // max-age=600 and a stale index.html could get cached next to newer assets.
+  // 'no-cache' still gets a 304 for files the page just downloaded, so the
+  // first install doesn't fetch the whole build a second time.
+  const reqs = FILES.map((f) => new Request(f, { cache: 'no-cache' }));
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(reqs)));
 });
 

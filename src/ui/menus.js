@@ -2,6 +2,8 @@ import { RESOURCES, RESOURCE_ORDER } from '../game/resources.js';
 import { UPGRADES, UPGRADE_ORDER, RECIPES, level, nextUpgrade } from '../game/upgrades.js';
 import { canInstall, updateReady, promptInstall, applyUpdate, onPwaChange } from '../pwa.js';
 import { el } from './dom.js';
+import { swatchStyle } from '../game/facts.js';
+import { WONDERS } from '../world/wonders.js';
 
 // have/need, same as the objective panel
 function costHtml(state, cost) {
@@ -24,7 +26,7 @@ const CONTROLS = [
   ['On foot', [['WASD', 'Move'], ['Mouse', 'Look'], ['Shift', 'Sprint'], ['Space', 'Jump, hold for jetpack'], ['Left Mouse', 'Mine'], ['Right Mouse', 'Analyze plants and creatures'], ['F', 'Scanner pulse'], ['E', 'Interact, board ship'], ['R', 'Recharge shield with Lumen']]],
   ['In the ship', [['Mouse', 'Steer'], ['W / S', 'Throttle'], ['A / D', 'Roll'], ['Shift', 'Boost'], ['Space', 'Pulse drive, away from planets'], ['E', 'Land, exit ship'], ['Left Mouse', 'Mining lasers'], ['F', 'Planet scan'], ['Wheel', 'Camera distance']]],
   ['Anywhere', [['Tab', 'Inventory'], ['J', 'Journal'], ['G', 'Galaxy map'], ['P', 'Photo mode'], ['Esc', 'Pause']]],
-  ['Photo mode', [['WASD', 'Fly'], ['R / F', 'Up, down'], ['Q / E', 'Roll'], ['Shift', 'Fast'], ['Wheel', 'Speed'], ['P', 'Back to the game']]],
+  ['Photo mode', [['WASD', 'Fly'], ['R / F', 'Up, down'], ['Q / E', 'Roll'], ['Shift', 'Fast'], ['Wheel', 'Speed'], ['Z / X', 'Time of day'], ['1 / 2', 'Zoom'], ['B', 'Focus blur'], ['V', 'Filter'], ['H', 'Hide ship'], ['Enter', 'Save a screenshot'], ['P', 'Back to the game']]],
 ];
 
 const SETTINGS = [
@@ -32,6 +34,8 @@ const SETTINGS = [
   ['invertY', 'Invert mouse Y', 'checkbox'],
   ['renderScale', 'Render scale', 'range', 0.5, 1, 0.05, (v) => `${Math.round(v * 100)}%`],
   ['shadows', 'Shadows', 'checkbox'],
+  ['ao', 'Ambient occlusion', 'checkbox'],
+  ['dof', 'Depth of field', 'checkbox'],
   ['volume', 'Volume', 'range', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`],
   ['music', 'Music', 'range', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`],
 ];
@@ -84,7 +88,10 @@ export class Menus {
       if (e.key === 'Enter') this.newJourney();
     });
     this.btnControls.onclick = () => {
-      this.titleControls.style.display = this.titleControls.style.display === 'none' ? '' : 'none';
+      const show = this.titleControls.style.display === 'none';
+      this.titleControls.style.display = show ? '' : 'none';
+      this.btnControls.classList.toggle('on', show);
+      t.classList.toggle('ctl-open', show);
     };
   }
 
@@ -197,7 +204,7 @@ export class Menus {
       this.tabs[id] = b;
     }
     this.invStatus = el('div', 'inv-status', head);
-    el('div', 'inv-close', head, '<kbd>Tab</kbd> close').onclick = () => this.game.closeMenus();
+    el('button', 'inv-close', head, '<kbd>Tab</kbd> close').onclick = () => this.game.closeMenus();
     this.invBody = el('div', 'inv-body', panel);
     this.tab = 'cargo';
     this.invBody.addEventListener('click', (e) => {
@@ -269,22 +276,27 @@ export class Menus {
     const st = this.game.state;
     const species = Object.values(st.species);
     const worlds = Object.values(st.discoveries);
-    const stat = (n, what) => `<div class="j-stat"><b>${n}</b> ${what}</div>`;
-    let h = '<div class="journal"><div class="j-col"><h4>Travel</h4>';
-    h += stat(st.visited.length, 'systems visited') + stat(worlds.length, 'worlds discovered') + stat(species.length, 'species catalogued') + stat(st.lore.length, 'echoes recorded');
-    h += `<div class="j-stat"><b>${fmtPlayTime(st.playTime)}</b> played</div>`;
-    h += '<h4>Worlds</h4>';
-    for (const w of worlds.reverse()) {
-      // life is how many plants and creatures live there, older saves don't have it
-      const life = w.life ? ` · Life ${w.found || 0}/${w.life}` : '';
-      h += `<div class="j-row"><b>${w.name}</b><span>${w.type} · ${w.system}${life}</span></div>`;
+    const wonders = st.wonders || [];
+    const stat = (n, what) => `<div class="j-stat"><b>${n}</b><span>${what}</span></div>`;
+    let h = `<div class="j-stats">${stat(st.visited.length, 'Systems')}${stat(worlds.length, 'Worlds')}${stat(species.length, 'Species')}${stat(wonders.length, 'Landmarks')}${stat(st.lore.length, 'Echoes')}${stat(fmtPlayTime(st.playTime), 'Played')}</div>`;
+    h += '<div class="journal"><div class="j-col"><h4>Worlds</h4>';
+    for (const w of [...worlds].reverse()) {
+      // saves from before the atlas have no colors
+      const colors = w.colors || ['#9aa4b4', '#5c6474', '#262b36'];
+      const chips = [];
+      if (w.life) chips.push(`<i class="${(w.found || 0) >= w.life ? 'done' : ''}">Life ${w.found || 0}/${w.life}</i>`);
+      if (w.wonderTotal) chips.push(`<i class="${(w.wonders || 0) >= w.wonderTotal ? 'done' : ''}">Landmarks ${w.wonders || 0}/${w.wonderTotal}</i>`);
+      h += `<div class="j-world"><div class="j-orb" style="${swatchStyle(colors, w.gas)}"></div><div class="j-world-text"><b>${w.name}</b><span>${w.type}${w.moon ? ' moon' : ''} · ${w.system}</span>${chips.length ? `<div class="j-chips">${chips.join('')}</div>` : ''}</div></div>`;
     }
-    h += '</div><div class="j-col"><h4>Species</h4>';
-    for (const s of species.reverse()) h += `<div class="j-row"><b>${s.name}</b><span>${s.label ? `${s.label} · ` : ''}${s.planet}</span></div>`;
+    h += '</div><div class="j-col"><h4>Landmarks</h4>';
+    for (const w of [...wonders].reverse()) h += `<div class="j-row"><b>${w.name}</b><span>${w.kind === 'comet' ? 'Comet' : WONDERS[w.kind] ? WONDERS[w.kind].label : 'Landmark'} · ${w.planet}</span></div>`;
+    if (!wonders.length) h += '<div class="j-empty">Big landmarks stand out on the horizon. Walk or fly close to one to log it.</div>';
+    h += '<h4>Species</h4>';
+    for (const sp of [...species].reverse()) h += `<div class="j-row"><b>${sp.name}</b><span>${sp.label ? `${sp.label} · ` : ''}${sp.planet}</span></div>`;
     if (!species.length) h += '<div class="j-empty">Hold Right Mouse on a plant or creature to catalogue it.</div>';
     h += '</div><div class="j-col"><h4>Echoes</h4>';
     for (const l of [...st.lore].reverse()) h += `<div class="j-lore"><div class="j-lore-title">${l.title}</div>${l.text.map((p) => `<p>${p}</p>`).join('')}</div>`;
-    if (!st.lore.length) h += '<div class="j-empty">Echo Stones and spires record what you find here.</div>';
+    if (!st.lore.length) h += '<div class="j-empty">Echo Stones, wrecks and spires record what you find here.</div>';
     h += '</div></div>';
     return h;
   }
@@ -296,8 +308,8 @@ export class Menus {
     this.dlgTitle = el('div', 'dlg-title', panel);
     this.dlgBody = el('div', 'dlg-body', panel);
     this.dlgReward = el('div', 'dlg-reward', panel);
-    const b = el('button', 'btn primary', panel, 'Continue');
-    b.onclick = () => this.game.closeMenus();
+    this.dlgBtn = el('button', 'btn primary', panel, 'Continue');
+    this.dlgBtn.onclick = () => this.game.closeMenus();
   }
 
   showDialog(title, paragraphs, reward) {
@@ -305,6 +317,8 @@ export class Menus {
     this.dlgBody.innerHTML = paragraphs.map((p) => `<p>${p}</p>`).join('');
     this.dlgReward.innerHTML = reward || '';
     this.open('dialog');
+    // so Enter or Space closes it without reaching for the mouse
+    this.dlgBtn.focus({ preventScroll: true });
   }
 
   // ---------------------------------------------------------------- overlay

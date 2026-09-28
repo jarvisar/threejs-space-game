@@ -5,17 +5,20 @@ import { fillAtmoCommon } from './planet.js';
 import { createRings } from './rings.js';
 import { Body } from './body.js';
 
+// Faceted like the rocky planets: every triangle carries its centroid, so
+// band color and lighting are one value per face.
 const vert = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
+attribute vec3 aCenter;
 varying vec3 vLocal;
 varying vec3 vWorld;
 varying vec3 vN;
 void main() {
-  vLocal = normalize(position);
+  vLocal = normalize(aCenter);
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorld = wp.xyz;
-  vN = normalize(mat3(modelMatrix) * normal);
+  vN = normalize(mat3(modelMatrix) * vLocal);
   gl_Position = projectionMatrix * viewMatrix * wp;
   #include <logdepthbuf_vertex>
 }
@@ -37,13 +40,15 @@ varying vec3 vWorld;
 varying vec3 vN;
 ${NOISE_GLSL}
 
+// stepped bands with a short blend at each edge, faces pick one side or the other
 vec3 bandColor(float t) {
   t = fract(t) * 5.0;
-  if (t < 1.0) return mix(uC0, uC1, smoothstep(0.0, 1.0, t));
-  if (t < 2.0) return mix(uC1, uC2, smoothstep(1.0, 2.0, t));
-  if (t < 3.0) return mix(uC2, uC3, smoothstep(2.0, 3.0, t));
-  if (t < 4.0) return mix(uC3, uC4, smoothstep(3.0, 4.0, t));
-  return mix(uC4, uC0, smoothstep(4.0, 5.0, t));
+  float f = smoothstep(0.75, 1.0, fract(t));
+  if (t < 1.0) return mix(uC0, uC1, f);
+  if (t < 2.0) return mix(uC1, uC2, f);
+  if (t < 3.0) return mix(uC2, uC3, f);
+  if (t < 4.0) return mix(uC3, uC4, f);
+  return mix(uC4, uC0, f);
 }
 
 void main() {
@@ -80,6 +85,20 @@ void main() {
 }
 `;
 
+function facetedSphere(radius, detail) {
+  const g = new THREE.IcosahedronGeometry(radius, detail);
+  const p = g.attributes.position;
+  const c = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i += 3) {
+    const x = (p.getX(i) + p.getX(i + 1) + p.getX(i + 2)) / 3;
+    const y = (p.getY(i) + p.getY(i + 1) + p.getY(i + 2)) / 3;
+    const z = (p.getZ(i) + p.getZ(i + 1) + p.getZ(i + 2)) / 3;
+    for (let k = 0; k < 3; k++) c.set([x, y, z], (i + k) * 3);
+  }
+  g.setAttribute('aCenter', new THREE.BufferAttribute(c, 3));
+  return g;
+}
+
 export class GasGiant extends Body {
   constructor(def) {
     super();
@@ -100,7 +119,7 @@ export class GasGiant extends Body {
       uSeed: { value: (def.seed % 1000) * 0.1 },
     };
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(this.radius, 128, 64),
+      facetedSphere(this.radius, 44),
       new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: vert, fragmentShader: frag })
     );
     this.group.add(mesh);

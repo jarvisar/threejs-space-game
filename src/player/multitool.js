@@ -56,44 +56,38 @@ export class Multitool {
     this.root.position.set(0.28, -0.26, -0.55);
     camera.add(this.root);
 
-    const body = toolMaterial(0xd6dbe3, 0.4, 0.35);
-    const dark = toolMaterial(0x252b36, 0.6, 0.4);
-    const accent = toolMaterial(0xff8a3c, 0.2, 0.5);
+    // chunky and rounded, closer to a toy than a rifle
+    const body = toolMaterial(0xeee6d6, 0.05, 0.55);
+    const dark = toolMaterial(0x2a303b, 0.3, 0.5);
+    const accent = toolMaterial(0xff8a3c, 0.1, 0.5);
     const glowMat = toolMaterial(0x000000, 0, 1, 0x66ddff);
     this.glowMat = glowMat;
+    const along = (geo) => geo.rotateX(Math.PI / 2);
 
     const g = new THREE.Group();
-    const main = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.34), body);
-    g.add(main);
-    const top = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, 0.26), dark);
-    top.position.set(0, 0.055, -0.02);
-    g.add(top);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.03, 0.18, 12), dark);
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.005, -0.25);
-    g.add(barrel);
-    const ring1 = new THREE.Mesh(new THREE.TorusGeometry(0.034, 0.008, 6, 16), accent);
-    ring1.position.set(0, 0.005, -0.2);
-    g.add(ring1);
-    const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.02, 12), glowMat);
-    tip.rotation.x = Math.PI / 2;
-    tip.position.set(0, 0.005, -0.345);
-    g.add(tip);
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.07), dark);
-    grip.position.set(0, -0.09, 0.08);
-    grip.rotation.x = 0.25;
-    g.add(grip);
-    const cell = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.12, 10), glowMat);
-    cell.rotation.x = Math.PI / 2;
-    cell.position.set(0.042, 0.02, 0.04);
-    g.add(cell);
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.05, 0.12), accent);
-    fin.position.set(0, 0.09, 0.05);
-    g.add(fin);
+    const add = (geo, mat, x, y, z, rx = 0) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      m.rotation.x = rx;
+      g.add(m);
+      return m;
+    };
+    add(along(new THREE.CapsuleGeometry(0.046, 0.19, 3, 8)), body, 0, 0, -0.02);
+    // energy canister on top, with dark end caps
+    add(along(new THREE.CylinderGeometry(0.021, 0.021, 0.13, 8)), glowMat, 0, 0.055, 0.02);
+    add(along(new THREE.CylinderGeometry(0.027, 0.027, 0.022, 8)), dark, 0, 0.055, 0.095);
+    add(along(new THREE.CylinderGeometry(0.027, 0.027, 0.022, 8)), dark, 0, 0.055, -0.055);
+    // flared nozzle with a ring
+    add(along(new THREE.CylinderGeometry(0.024, 0.038, 0.08, 8)), dark, 0, 0, -0.18);
+    add(new THREE.TorusGeometry(0.043, 0.009, 6, 12), accent, 0, 0, -0.145);
+    add(along(new THREE.CylinderGeometry(0.022, 0.022, 0.012, 8)), glowMat, 0, 0, -0.222);
+    // grip and side fins
+    add(new THREE.CapsuleGeometry(0.022, 0.07, 2, 6), dark, 0, -0.075, 0.07, 0.3);
+    for (const side of [-1, 1]) add(new THREE.BoxGeometry(0.012, 0.03, 0.09), accent, side * 0.047, -0.01, 0.02);
     g.rotation.y = 0.06;
     this.model = g;
     this.root.add(g);
-    this.muzzle = new THREE.Vector3(0, 0.005, -0.36);
+    this.muzzle = new THREE.Vector3(0, 0, -0.23);
 
     this.beamUniforms = {
       uColor: { value: new THREE.Color(1.0, 0.45, 0.2) },

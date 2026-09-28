@@ -37,45 +37,52 @@ body {
   z-index: 2;
 }
 
-/* static text from index.html, shows while the script loads or if the game can't start */
-#about {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 0 16px;
-  text-align: center;
-  user-select: text;
-  -webkit-user-select: text;
+/* Everything is sized in px for 1080p. On 1440p and 4K screens at 100% OS
+   scaling the UI gets zoomed so it stays about the same physical size.
+   Markers only zoom their contents, their position comes from JS in screen px,
+   and the galaxy map hover label isn't zoomed for the same reason. The loading
+   screen in index.html copies the title zoom so the two still line up. Zoom
+   also multiplies vh and vw, so rules using them divide by --z. */
+:root {
+  --z: 1;
 }
-#about[hidden] {
-  display: none;
+@media (min-width: 2400px) and (min-height: 1300px) {
+  :root {
+    --z: 1.25;
+  }
 }
-#about h1 {
-  font-size: clamp(40px, 7vw, 88px);
-  font-weight: 300;
-  letter-spacing: 0.42em;
-  margin: 0 -0.42em 14px 0;
-  text-transform: uppercase;
-  color: #f4f8ff;
+@media (min-width: 3200px) and (min-height: 1800px) {
+  :root {
+    --z: 1.5;
+  }
 }
-#about p {
-  max-width: 560px;
-  margin: 6px 0;
-  font-size: 17px;
-  line-height: 1.45;
-  color: var(--ui-dim);
-}
-#about .about-error {
-  color: var(--warm);
+.hud-tl,
+.hud-center,
+.target-info,
+.prompt,
+.hint,
+.banner,
+.center-msg,
+.hud-bottom,
+.feed,
+.dcard,
+.photo-hint,
+.photo-status,
+.marker > *,
+.menus .screen > *,
+.gmap-title,
+.gmap-legend,
+.gmap-info {
+  zoom: var(--z);
 }
 
+/* HUD text sits on the 3D view, so the dim color is a bit stronger than in the
+   menus and the shadow is wide enough to hold up against bright sky and snow */
 .hud {
+  --ui-dim: rgba(218, 238, 255, 0.8);
   position: absolute;
   inset: 0;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.75), 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 12px rgba(0, 0, 0, 0.4);
 }
 
 /* ---------- location / objective ---------- */
@@ -83,7 +90,7 @@ body {
   position: absolute;
   left: 28px;
   top: 22px;
-  max-width: 380px;
+  max-width: min(380px, calc(100vw / var(--z) - 56px));
 }
 .loc-system {
   font-size: 13px;
@@ -231,7 +238,11 @@ body {
   border: 1px solid var(--ui-line);
   opacity: 0;
   transition: opacity 0.15s;
-  white-space: nowrap;
+  /* one line unless the window is too narrow for it */
+  width: max-content;
+  max-width: calc(100vw / var(--z) - 32px);
+  box-sizing: border-box;
+  text-align: center;
 }
 .prompt.show {
   opacity: 1;
@@ -272,10 +283,14 @@ kbd {
   left: 50%;
   bottom: 26px;
   transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 40px);
+  box-sizing: border-box;
   padding: 6px 14px;
   font-size: 14px;
+  line-height: 1.9;
+  text-align: center;
   color: var(--ui-dim);
-  white-space: nowrap;
   background: var(--ui-panel);
   border: 1px solid var(--ui-line);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
@@ -292,6 +307,26 @@ kbd {
 }
 .photo-hint span {
   margin-left: 16px;
+  white-space: nowrap;
+}
+.photo-status {
+  position: absolute;
+  left: 50%;
+  top: 36px;
+  transform: translateX(-50%);
+  padding: 4px 16px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ui);
+  background: var(--ui-panel);
+  border: 1px solid var(--ui-line);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.photo-status.show {
+  opacity: 1;
 }
 
 .banner {
@@ -299,6 +334,7 @@ kbd {
   left: 0;
   right: 0;
   top: 24%;
+  padding: 0 16px;
   text-align: center;
   opacity: 0;
   pointer-events: none;
@@ -350,7 +386,9 @@ kbd {
   color: var(--warm);
   opacity: 0;
   transition: opacity 0.3s;
-  white-space: nowrap;
+  width: max-content;
+  max-width: calc(100vw / var(--z) - 32px);
+  text-align: center;
 }
 .center-msg.show {
   opacity: 1;
@@ -573,4 +611,128 @@ kbd {
 .marker.edge .marker-label,
 .marker.edge .marker-sub {
   display: none;
+}
+
+/* ---------- discovery card ---------- */
+.dcard {
+  position: absolute;
+  right: 28px;
+  top: 150px;
+  width: 280px;
+  padding: 14px 16px 12px;
+  background: linear-gradient(180deg, rgba(10, 20, 34, 0.82), rgba(8, 14, 24, 0.7));
+  border: 1px solid var(--ui-line);
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: translateX(24px);
+  transition: opacity 0.45s, transform 0.45s;
+}
+.dcard.show {
+  opacity: 1;
+  transform: none;
+}
+.dcard-kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--warm);
+  margin-bottom: 10px;
+}
+.dcard-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.dcard-orb {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  box-shadow: 0 0 14px rgba(160, 220, 255, 0.25), inset -6px -8px 14px rgba(0, 0, 0, 0.45);
+}
+.dcard-name {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.05;
+}
+.dcard-type {
+  font-size: 14px;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+}
+.dcard-rows div {
+  display: flex;
+  justify-content: space-between;
+  font-size: 15px;
+  padding: 3px 0;
+  border-top: 1px solid rgba(150, 215, 255, 0.12);
+}
+.dcard-rows span {
+  color: var(--ui-dim);
+}
+.dcard-rows b {
+  font-weight: 600;
+  text-align: right;
+}
+.dcard-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.dcard-tags i {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--ui-line);
+  color: var(--ui);
+}
+
+.loc-route {
+  font-size: 14px;
+  color: #ffd28a;
+  margin-top: 2px;
+}
+.loc-route b {
+  color: #ffe6b8;
+}
+
+/* small windows: the card stays in the corner and drops the detail rows */
+@media (max-width: 1100px), (max-height: 700px) {
+  .dcard {
+    width: 220px;
+    right: 14px;
+    top: 118px;
+    padding: 10px 12px 8px;
+  }
+  .dcard-name {
+    font-size: 18px;
+  }
+  .dcard-orb {
+    width: 36px;
+    height: 36px;
+  }
+  .dcard-rows div {
+    font-size: 13px;
+    padding: 2px 0;
+  }
+  .dcard-rows div:nth-child(n + 5),
+  .dcard-tags {
+    display: none;
+  }
+}
+@media (max-width: 700px), (max-height: 480px) {
+  .dcard-rows {
+    display: none;
+  }
+  .dcard-head {
+    margin-bottom: 0;
+  }
 }

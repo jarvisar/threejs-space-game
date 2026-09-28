@@ -29,11 +29,17 @@
   border: 1px solid var(--ui-line);
   padding: 22px 26px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  max-height: 88vh;
+  max-height: calc(88vh / var(--z));
   overflow: auto;
 }
+.menus .screen,
+.panel,
+.inv-body {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(150, 215, 255, 0.3) transparent;
+}
 .panel.pause {
-  width: min(960px, 94vw);
+  width: min(960px, calc(94vw / var(--z)));
   display: grid;
   grid-template-columns: 330px 1fr;
   gap: 34px;
@@ -56,8 +62,8 @@
   margin: 14px 0 0;
 }
 .panel.wide {
-  width: min(1100px, 94vw);
-  height: min(720px, 88vh);
+  width: min(1100px, calc(94vw / var(--z)));
+  height: min(720px, calc(88vh / var(--z)));
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -79,19 +85,32 @@
   border: 1px solid var(--ui-line);
   padding: 9px 18px;
   cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   transition: background 0.15s, border-color 0.15s;
 }
-.btn:hover:not([disabled]) {
+.btn:hover:not([disabled]),
+.btn.on {
   background: rgba(60, 120, 160, 0.45);
   border-color: var(--accent);
+}
+.btn:active:not([disabled]) {
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45);
 }
 .btn.primary {
   border-color: var(--warm);
   color: #ffe7c7;
   background: rgba(80, 45, 10, 0.45);
 }
-.btn.primary:hover {
+.btn.primary:hover:not([disabled]) {
   background: rgba(140, 80, 20, 0.55);
+  border-color: var(--warm);
+}
+.btn:focus-visible,
+.tab:focus-visible,
+.inv-close:focus-visible,
+.settings input:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 .btn.warn,
 .btn.warn:hover {
@@ -110,14 +129,25 @@
 
 /* title */
 .title-screen {
+  --ui-dim: rgba(214, 236, 255, 0.72);
   background: radial-gradient(ellipse at 50% 60%, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.55) 100%);
+  /* scrolls when the controls panel doesn't fit. The padding is the same top
+     and bottom so the centered layout (which index.html's loading screen
+     copies) doesn't move */
+  box-sizing: border-box;
+  padding: 8vh 16px;
+  overflow-y: auto;
+}
+.menus[data-open='title'] .title-screen {
+  align-items: safe center;
+  justify-content: safe center;
 }
 .title-inner {
   text-align: center;
-  margin-top: -6vh;
+  margin-top: calc(-6vh / var(--z));
 }
 .title-name {
-  font-size: clamp(56px, 9vw, 120px);
+  font-size: clamp(34px, calc(9vw / var(--z)), 120px);
   font-weight: 300;
   letter-spacing: 0.42em;
   margin-right: -0.42em;
@@ -134,6 +164,7 @@
 }
 .title-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   justify-content: center;
 }
@@ -172,15 +203,26 @@
   padding: 3px 8px;
   text-align: center;
 }
+.seed-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 .title-foot {
   position: absolute;
   bottom: 22px;
-  left: 0;
-  right: 0;
+  left: 16px;
+  right: 16px;
   text-align: center;
   font-size: 13px;
   color: var(--ui-dim);
   letter-spacing: 0.08em;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+}
+/* on short windows the open controls panel reaches the bottom line */
+@media (max-height: 900px) {
+  .title-screen.ctl-open .title-foot {
+    display: none;
+  }
 }
 .title-pwa {
   position: absolute;
@@ -199,7 +241,7 @@
   background: rgba(6, 12, 20, 0.7);
   padding: 16px 22px;
   border: 1px solid var(--ui-line);
-  max-width: 94vw;
+  max-width: calc(94vw / var(--z));
   box-sizing: border-box;
 }
 /* the pause menu shows it next to the settings */
@@ -211,6 +253,20 @@
   padding: 0;
   background: none;
   border: none;
+}
+@media (max-width: 760px) {
+  .panel.pause {
+    grid-template-columns: 1fr;
+    gap: 22px;
+  }
+}
+@media (max-width: 520px) {
+  .controls-panel.small {
+    grid-template-columns: 1fr;
+  }
+  .panel {
+    padding: 18px 16px;
+  }
 }
 .ctl-grid {
   display: grid;
@@ -253,6 +309,7 @@
 /* inventory */
 .inv-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   padding: 14px 20px 0;
@@ -270,6 +327,10 @@
   border-bottom: 2px solid transparent;
   padding: 8px 14px;
   cursor: pointer;
+  transition: color 0.15s;
+}
+.tab:hover {
+  color: var(--ui);
 }
 .tab.on {
   color: var(--ui);
@@ -290,14 +351,34 @@
 }
 .inv-close {
   margin-left: 18px;
+  padding: 4px 0;
+  font-family: inherit;
   font-size: 13px;
   color: var(--ui-dim);
+  background: none;
+  border: none;
   cursor: pointer;
+}
+.inv-close:hover {
+  color: var(--ui);
 }
 .inv-body {
   flex: 1;
   overflow: auto;
   padding: 18px 20px;
+}
+@media (max-width: 560px) {
+  .inv-head {
+    padding: 10px 10px 0;
+  }
+  .tab {
+    font-size: 14px;
+    letter-spacing: 0.08em;
+    padding: 8px 8px;
+  }
+  .inv-body {
+    padding: 14px 12px;
+  }
 }
 .res-grid {
   display: grid;
@@ -436,6 +517,16 @@
 .upg-next b {
   font-size: 15px;
 }
+/* stack name, next level and button once the middle column gets squeezed */
+@media (max-width: 720px) {
+  .upg {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .upg .btn {
+    justify-self: start;
+  }
+}
 .journal {
   display: grid;
   grid-template-columns: 1fr 1fr 1.4fr;
@@ -448,13 +539,73 @@
   text-transform: uppercase;
   color: var(--warm);
 }
+.j-stats {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+}
 .j-stat {
-  font-size: 15px;
-  color: var(--ui-dim);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 4px;
+  border: 1px solid rgba(150, 215, 255, 0.14);
+  background: rgba(150, 215, 255, 0.04);
 }
 .j-stat b {
   color: var(--ui);
-  font-size: 18px;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.j-stat span {
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ui-dim);
+}
+.j-world {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.j-orb {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  box-shadow: inset -4px -6px 10px rgba(0, 0, 0, 0.45);
+}
+.j-world-text {
+  display: flex;
+  flex-direction: column;
+}
+.j-world-text span {
+  font-size: 13px;
+  color: var(--ui-dim);
+}
+.j-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+.j-chips i {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 1px 7px;
+  border-radius: 20px;
+  border: 1px solid rgba(150, 215, 255, 0.25);
+  color: var(--ui-dim);
+}
+.j-chips i.done {
+  border-color: var(--good);
+  color: var(--good);
 }
 .j-col h4:not(:first-child) {
   margin-top: 18px;
@@ -488,7 +639,7 @@
 
 /* dialog */
 .panel.dialog {
-  width: min(620px, 90vw);
+  width: min(620px, calc(90vw / var(--z)));
   text-align: left;
 }
 .dlg-title {
@@ -561,11 +712,30 @@
 .gmap-keys kbd {
   margin-left: 8px;
 }
+.gmap-close {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.gmap-close:hover {
+  color: var(--ui);
+}
+.gmap-close:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
 .gmap-info {
   position: absolute;
   right: 28px;
   top: 22px;
   width: 320px;
+  /* 44px of margin plus the padding and border */
+  max-height: calc(100vh / var(--z) - 78px);
+  overflow-y: auto;
   padding: 16px 18px;
   background: rgba(8, 15, 26, 0.82);
   border: 1px solid var(--ui-line);
@@ -573,6 +743,33 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(150, 215, 255, 0.3) transparent;
+}
+/* narrow windows: the info panel goes under the title instead of on top of it */
+@media (max-width: 720px) {
+  .gmap-title {
+    left: 16px;
+    top: 14px;
+    font-size: 20px;
+  }
+  .gmap-info {
+    left: 16px;
+    right: 16px;
+    top: 50px;
+    width: auto;
+    max-height: calc(60vh - 84px);
+  }
+  .gmap-legend {
+    left: 16px;
+    bottom: 14px;
+  }
+}
+/* short windows keep the key row but drop the star colors */
+@media (max-height: 480px) {
+  .gmap-legend > div:not(.gmap-keys) {
+    display: none;
+  }
 }
 .gi-here {
   font-size: 13px;
@@ -602,6 +799,14 @@
 .gi-why {
   font-size: 14px;
   color: #ffb1a6;
+}
+.gi-route {
+  font-size: 15px;
+  color: #ffd28a;
+  margin-top: 4px;
+}
+.gi-route b {
+  color: #ffe6b8;
 }
 .gi-hint {
   font-size: 15px;
@@ -672,4 +877,17 @@
 .death-text {
   font-size: 17px;
   color: var(--ui);
+}
+
+/* journal on narrow windows: stats wrap, columns stack */
+@media (max-width: 700px) {
+  .j-stats {
+    flex-wrap: wrap;
+  }
+  .j-stat {
+    flex: 1 1 30%;
+  }
+  .journal {
+    grid-template-columns: 1fr;
+  }
 }

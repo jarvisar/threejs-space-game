@@ -10,9 +10,11 @@ export const env = {
   uEnvRadius: { value: 1 },
   uEnvSky: { value: new THREE.Color(0, 0, 0) },
   uEnvGround: { value: new THREE.Color(0, 0, 0) },
-  uEnvNight: { value: new THREE.Color(0.045, 0.055, 0.085) },
+  // bluish night fill, bright enough to find your way without the headlamp
+  uEnvNight: { value: new THREE.Color(0.07, 0.085, 0.14) },
   uTime: { value: 0 },
   uWind: { value: 0.5 },
+  uAmbK: { value: 1.55 },
 };
 
 // Replaces Three's directional light direction with a per-fragment direction
@@ -24,24 +26,6 @@ function patchLightsChunk() {
     'getDirectionalLightInfo( directionalLight, directLight ); directLight.direction = sunDirView; directLight.color *= sunVis;'
   );
 }
-
-// Bump from a procedural height in meters (Mikkelsen, unnormalized derivatives).
-// Must be called in uniform control flow, derivatives inside a branch come back
-// as garbage on D3D.
-const BUMP_GLSL = /* glsl */ `
-vec3 bumpNormal(vec3 surfPos, vec3 N, float H) {
-  vec3 dpdx = dFdx(surfPos);
-  vec3 dpdy = dFdy(surfPos);
-  vec2 dH = vec2(dFdx(H), dFdy(H));
-  vec3 r1 = cross(dpdy, N);
-  vec3 r2 = cross(N, dpdx);
-  float det = dot(dpdx, r1);
-  vec3 grad = sign(det) * (dH.x * r1 + dH.y * r2);
-  vec3 n = abs(det) * N - grad;
-  float l = length(n);
-  return l > 1e-24 ? n / l : N;
-}
-`;
 
 // Adds the shared world position varying, star direction and planet ambient
 // to a MeshStandardMaterial. opts.center is the uniform holding the planet
@@ -63,6 +47,7 @@ export function patchStandard(material, opts = {}) {
     shader.uniforms.uAmbRadius = radius;
     shader.uniforms.uTime = env.uTime;
     shader.uniforms.uWind = env.uWind;
+    shader.uniforms.uAmbK = env.uAmbK;
     for (const [k, v] of Object.entries(extraUniforms)) shader.uniforms[k] = v;
 
     shader.vertexShader = shader.vertexShader
@@ -103,9 +88,9 @@ export function patchStandard(material, opts = {}) {
         uniform vec3 uEnvNight;
         uniform vec3 uAmbCenter;
         uniform float uAmbRadius;
+        uniform float uAmbK;
         uniform float uTime;
         ${opts.noise ? NOISE_GLSL : ''}
-        ${BUMP_GLSL}
         ${opts.fragmentPars || ''}`
       )
       .replace(
@@ -136,9 +121,13 @@ export function patchStandard(material, opts = {}) {
           float day = smoothstep(-0.2, 0.3, dot(upW, sunW));
           vec3 nW = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
           float hemi = dot(nW, upW) * 0.5 + 0.5;
-          vec3 amb = mix(uEnvGround, uEnvSky, hemi) * day + uEnvNight * (0.5 + 0.5 * hemi);
+          // bright sky fill so shadows keep the sky's color instead of going gray
+          vec3 amb = mix(uEnvGround, uEnvSky, hemi) * day * uAmbK + uEnvNight * (0.5 + 0.5 * hemi);
           reflectedLight.indirectDiffuse += amb * diffuseColor.rgb;
-          reflectedLight.indirectSpecular += amb * 0.25 * (1.0 - roughnessFactor) ;
+          reflectedLight.indirectSpecular += amb * 0.25 * (1.0 - roughnessFactor);
+          // soft sky colored rim, gives shapes a clean outline against the ground
+          float rim = pow(1.0 - min(abs(dot(normal, normalize(vViewPosition))), 1.0), 4.0);
+          reflectedLight.indirectSpecular += uEnvSky * rim * ${(opts.rim ?? 0.5).toFixed(2)} * day;
         }
         #include <aomap_fragment>
         ${opts.emissive || ''}`
@@ -148,13 +137,13 @@ export function patchStandard(material, opts = {}) {
   return material;
 }
 
-// Terrain material. Coloring runs per fragment from height, moisture and slope
-// so every planet can use the same program with different uniforms.
+// Terrain material. Coloring runs from height, moisture and slope so every
+// planet can use the same program with different uniforms.
 export function createTerrainMaterial(def, planetUniforms) {
   const pal = def.palette;
   const col = (hex) => ({ value: new THREE.Color(hex) });
-  const snowLine = def.type === 'frozen' ? -40 : def.type === 'lush' || def.type === 'ocean' ? def.maxHeight * 0.62 : def.type === 'barren' || def.type === 'radioactive' ? def.maxHeight * 0.85 : 1e5;
-  const polar = def.type === 'frozen' ? 0.0 : def.type === 'lush' || def.type === 'ocean' ? 0.14 : def.type === 'barren' ? 0.08 : 0.0;
+  const snowLine = def.type === 'frozen' ? def.maxHeight * 0.3 : def.type === 'lush' || def.type === 'ocean' ? def.maxHeight * 0.62 : def.type === 'barren' || def.type === 'radioactive' ? def.maxHeight * 0.85 : 1e5;
+  const polar = def.type === 'frozen' ? 0.35 : def.type === 'lush' || def.type === 'ocean' ? 0.14 : def.type === 'barren' ? 0.08 : 0.0;
   const vegAmount = { lush: 1, ocean: 1, toxic: 0.8, exotic: 0.8, radioactive: 0.45, desert: 0.2, frozen: 0.3, volcanic: 0.25, barren: 0.12, dead: 0 }[def.type] ?? 0.5;
 
   const uniforms = {
@@ -175,34 +164,56 @@ export function createTerrainMaterial(def, planetUniforms) {
     uVegAmount: { value: vegAmount },
     uSeed: { value: (def.seed % 1000) * 0.137 },
     uLava: { value: def.ocean && def.ocean.mode === 'lava' ? 1 : 0 },
+    // thickness of the rock layers on cliffs, in meters
+    uStrata: { value: 5 + (def.seed % 7) },
+    uFacet: { value: 0.6 },
     uScanPos: planetUniforms.scanPos,
     uScanRadius: planetUniforms.scanRadius,
     uRot: planetUniforms.rot,
   };
 
+  // Soft facets: the lighting normal is part smooth, part flat, so triangles
+  // read gently, like sculpted clay. Color comes from smooth inputs, only a
+  // faint value shift is per face (the flat varying, taken from the
+  // triangle's first vertex).
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0.0 });
   patchStandard(mat, {
     key: 'terrain',
+    rim: 0.15,
     center: planetUniforms.center,
     radius: planetUniforms.radius,
     sky: planetUniforms.sky,
     ground: planetUniforms.ground,
     noise: true,
     uniforms,
-    vertexPars: `attribute vec2 aData; varying vec2 vData; varying vec3 vGeoNormalW;`,
+    vertexPars: /* glsl */ `
+      attribute vec2 aData;
+      uniform vec3 uCenter;
+      uniform mat3 uRot;
+      varying vec2 vData;
+      varying vec3 vGeoNormalW;
+      flat varying vec3 vFaceP;
+    `,
     vertexBegin: `vData = aData;`,
-    vertexEnd: `vGeoNormalW = normalize(mat3(modelMatrix) * objectNormal);`,
+    vertexEnd: `vGeoNormalW = normalize(mat3(modelMatrix) * objectNormal); vFaceP = uRot * (vWorldPosP - uCenter);`,
     fragmentPars: /* glsl */ `
       varying vec2 vData;
       varying vec3 vGeoNormalW;
+      flat varying vec3 vFaceP;
       uniform vec3 uCenter;
       uniform vec3 uColSand, uColLow, uColMid, uColHigh, uColCliff, uColPeak, uColVeg, uColVeg2, uColDeep;
-      uniform float uMaxH, uSnowLine, uPolar, uHasOcean, uVegAmount, uSeed, uLava;
+      uniform float uMaxH, uSnowLine, uPolar, uHasOcean, uVegAmount, uSeed, uLava, uStrata, uFacet;
       uniform vec3 uScanPos;
       uniform float uScanRadius;
       uniform mat3 uRot;
-      float gTerrainH;
       float gRough;
+      float faceHash(vec3 p) {
+        uvec3 q = uvec3(ivec3(floor(p * 3.0)) + 65536);
+        uint h = (q.x * 1597334677u) ^ (q.y * 3812015801u) ^ (q.z * 2798796415u);
+        h = (h ^ (h >> 16)) * 2246822519u;
+        h ^= h >> 13;
+        return float(h & 0xffffffu) / 16777215.0;
+      }
     `,
     color: /* glsl */ `
       {
@@ -212,70 +223,63 @@ export function createTerrainMaterial(def, planetUniforms) {
         float dist = length(vWorldPosP);
         float h = vData.x;
         float m = vData.y;
-        float hn = h / uMaxH;
         float slope = 1.0 - dot(normalize(vGeoNormalW), normalize(pw));
+        // anything smaller than a few hundred meters is faded out with
+        // distance, from orbit it would only speckle
+        float fine = 1.0 - smoothstep(300.0, 2000.0, dist);
         float n1 = snoise(p * 0.0035 + uSeed);
-        float n2 = snoise(p * 0.028 + uSeed * 2.0);
-        float nearF = 1.0 - smoothstep(25.0, 90.0, dist);
-        float n3 = nearF > 0.0 ? fbm3(p * 0.3) * nearF : 0.0;
-        float hj = hn + n1 * 0.07 + n2 * 0.03;
+        float n2 = snoise(p * 0.028 + uSeed * 2.0) * fine;
+        float hj = h / uMaxH + n1 * 0.07 + n2 * 0.03;
 
-        vec3 c = mix(uColLow, uColMid, smoothstep(0.06, 0.34, hj));
-        c = mix(c, uColHigh, smoothstep(0.38, 0.75, hj));
+        vec3 c = mix(uColLow, uColMid, smoothstep(0.08, 0.32, hj));
+        c = mix(c, uColHigh, smoothstep(0.42, 0.7, hj));
 
-        // patchy vegetation so meadows aren't one flat color
-        float midF = 1.0 - smoothstep(150.0, 900.0, dist);
-        float vpatch = midF > 0.0 ? (snoise(p * 0.06 + uSeed * 3.0) * 0.6 + snoise(p * 0.21 - uSeed) * 0.4) * midF : 0.0;
-        float veg = smoothstep(0.32, 0.72, m + n2 * 0.18 + vpatch * 0.15) * (1.0 - smoothstep(0.3, 0.62, hj)) * uVegAmount;
-        vec3 vegCol = mix(uColVeg2, uColVeg, smoothstep(0.35, 0.85, m + n1 * 0.25));
-        vegCol = mix(vegCol, uColVeg2, smoothstep(0.15, 0.7, vpatch) * 0.55);
-        vegCol *= 0.82 + 0.3 * (vpatch * 0.5 + 0.5);
-        veg *= 1.0 - (1.0 - smoothstep(-0.6, -0.25, vpatch)) * 0.7;
-        c = mix(c, vegCol, veg * (1.0 - smoothstep(0.18, 0.32, slope)));
+        // big soft vegetation regions, no small patches
+        float vpatch = snoise(p * 0.012 + uSeed * 3.0) * fine;
+        float veg = smoothstep(0.38, 0.62, m + n2 * 0.15 + vpatch * 0.15) * (1.0 - smoothstep(0.38, 0.6, hj)) * uVegAmount;
+        vec3 vegCol = mix(uColVeg2, uColVeg, smoothstep(0.35, 0.8, m + n1 * 0.25 + vpatch * 0.2));
+        c = mix(c, vegCol, veg * (1.0 - smoothstep(0.18, 0.3, slope)));
 
         float under = uHasOcean * (1.0 - smoothstep(-10.0, -0.5, h));
         c = mix(c, uColDeep, under);
-        float beach = (1.0 - smoothstep(0.6, 2.6 + n2 * 1.6, h)) * step(-14.0, h) * uHasOcean * (1.0 - uLava);
+        float beach = (1.0 - smoothstep(0.8, 2.6 + n2 * 1.2, h)) * step(-14.0, h) * uHasOcean * (1.0 - uLava);
         c = mix(c, uColSand, beach * (1.0 - smoothstep(0.35, 0.55, slope)));
         // scorched shoreline next to lava
         c = mix(c, uColCliff * 0.4, uLava * (1.0 - smoothstep(0.5, 4.0, h)));
 
-        float cliff = smoothstep(0.26, 0.48, slope + n2 * 0.08);
-        vec3 cliffCol = uColCliff * (0.8 + 0.4 * smoothstep(-0.6, 0.6, snoise(vec3(p.x, p.y * 6.0, p.z) * 0.05)));
+        // cliffs show layered rock, bands warped a little so they aren't
+        // perfect contour lines
+        float cliff = smoothstep(0.26, 0.4, slope + n2 * 0.05);
+        float layer = floor(h / uStrata + snoise(p * 0.01 + uSeed) * 0.7);
+        float tone = fract(layer * 0.618 + uSeed);
+        vec3 cliffCol = mix(uColCliff, uColHigh, tone * 0.6) * (0.86 + 0.28 * fract(layer * 0.371));
         c = mix(c, cliffCol, cliff);
 
         float lat = abs(up.y);
-        float snow = smoothstep(uSnowLine - 25.0, uSnowLine + 25.0, h + n1 * 40.0);
-        snow += smoothstep(0.98 - uPolar, 1.03 - uPolar, lat + n1 * 0.04) * step(0.001, uPolar);
-        snow = clamp(snow, 0.0, 1.0) * (1.0 - smoothstep(0.35, 0.6, slope));
+        float snow = smoothstep(uSnowLine - 20.0, uSnowLine + 20.0, h + n1 * 40.0);
+        snow += smoothstep(0.98 - uPolar, 1.02 - uPolar, lat + n1 * 0.04) * step(0.001, uPolar);
+        snow = clamp(snow, 0.0, 1.0) * (1.0 - smoothstep(0.35, 0.55, slope));
         c = mix(c, uColPeak, snow);
 
-        // close up: bare patches between the vegetation and a fine speckle
-        float n4 = nearF > 0.0 ? snoise(p * 1.9) : 0.0;
-        float bare = smoothstep(0.35, 0.75, n3 * 0.6 + n4 * 0.4) * veg * nearF;
-        c = mix(c, uColLow * 0.8 + uColSand * 0.2, bare * 0.45);
-        c *= 0.84 + 0.28 * (n3 * 0.5 + 0.5) * nearF + 0.09 * n4 * nearF + 0.16 * (1.0 - nearF);
+        c *= 0.97 + 0.06 * faceHash(vFaceP);
         diffuseColor.rgb = c;
-        gTerrainH = n3;
         gRough = mix(0.95, 0.55, snow);
 
         // scanner pulse ring, uScanPos is planet-fixed
         if (uScanRadius > 0.0) {
-          float d = length(p - uScanPos);
-          float ring = exp(-pow((d - uScanRadius) / 5.0, 2.0));
-          float trail = (1.0 - smoothstep(0.0, uScanRadius, d)) * 0.04 * step(d, uScanRadius);
+          float sd = length(p - uScanPos);
+          float ring = exp(-pow((sd - uScanRadius) / 5.0, 2.0));
+          float trail = (1.0 - smoothstep(0.0, uScanRadius, sd)) * 0.04 * step(sd, uScanRadius);
           diffuseColor.rgb += vec3(0.3, 0.9, 1.0) * (ring * 2.0 + trail) * (1.0 - smoothstep(800.0, 2500.0, uScanRadius));
         }
       }
     `,
     normal: /* glsl */ `
       {
-        float dist = length(vWorldPosP);
-        float fade = 1.0 - smoothstep(25.0, 90.0, dist);
-        vec3 p = uRot * (vWorldPosP - uCenter);
-        float sn = fade > 0.0 ? snoise(p * 1.7) : 0.0;
-        float H = (gTerrainH * 0.12 + sn * 0.025) * fade;
-        normal = bumpNormal(-vViewPosition, normal, H);
+        // same flat normal three uses for flatShading
+        vec3 fnV = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition)));
+        if (dot(fnV, normal) < 0.0) fnV = -fnV;
+        normal = normalize(mix(normal, fnV, uFacet));
       }
     `,
   });

@@ -5,6 +5,13 @@ export const MAX_ATMO_PLANETS = 4;
 // Full screen pass that composites oceans, cloud layers and single scattering
 // atmospheres over the scene using the depth buffer. Runs on layer 1 and writes
 // the scene depth back out so later transparent effects still depth test.
+//
+// Compile time: D3D's compiler inlines every call and unrolls loops with
+// constant bounds, and its time grows much faster than the code does. This
+// shader took 6 to 13 s to compile before, mostly from several inlined copies
+// of the noise heavy functions. So each of those has one call site, inside a
+// loop whose bound comes from a uniform (uZero is always 0 and only there to
+// stop unrolling). Please keep it that way when adding to it.
 
 export const atmosphereVertex = /* glsl */ `
 varying vec2 vUv;
@@ -17,8 +24,6 @@ void main() {
 export const atmosphereFragment = /* glsl */ `
 precision highp float;
 #define MAXP ${MAX_ATMO_PLANETS}
-#define VIEW_STEPS 14
-#define LIGHT_STEPS 6
 
 struct Planet {
   vec3 center;
@@ -42,7 +47,12 @@ struct Planet {
   float cloudScale;
   float cloudSeed;
   float cloudSpeed;
+  float cloudFar;
   vec3 ambient;
+  float auroraK;
+  float auroraLat;
+  vec3 auroraC1;
+  vec3 auroraC2;
 };
 
 uniform Planet planets[MAXP];
@@ -57,6 +67,13 @@ uniform vec3 uSunColor;
 uniform float uSunIntensity;
 uniform vec3 uNightAmbient;
 uniform float uDebug;
+uniform sampler2D tAO;
+uniform float uAOStrength;
+uniform float uAOPow;
+uniform int uViewSteps;
+uniform int uLightSteps;
+uniform int uAuroraSteps;
+uniform int uZero;
 
 varying vec2 vUv;
 
@@ -84,8 +101,8 @@ bool lightDepth(Planet P, vec3 p, out float odR, out float odM) {
   float c = dot(p, p);
   if (b < 0.0 && c - b * b < P.solidR * P.solidR) return false;
   float tExit = -b + sqrt(max(b * b - (c - P.atmoRadius * P.atmoRadius), 0.0));
-  float ds = tExit / float(LIGHT_STEPS);
-  for (int i = 0; i < LIGHT_STEPS; i++) {
+  float ds = tExit / float(uLightSteps);
+  for (int i = 0; i < uLightSteps; i++) {
     vec3 q = p + s * (ds * (float(i) + 0.5));
     float h = length(q) - P.radius;
     odR += densityR(P, h) * ds;
@@ -103,8 +120,7 @@ vec3 sunTransmittance(Planet P, vec3 p) {
 void integrate(Planet P, vec3 oc, vec3 rd, float ta, float tb, int n, inout float odR, inout float odM, inout vec3 sumR, inout vec3 sumM) {
   if (tb <= ta) return;
   float ds = (tb - ta) / float(n);
-  for (int i = 0; i < VIEW_STEPS; i++) {
-    if (i >= n) break;
+  for (int i = 0; i < n; i++) {
     float t = ta + ds * (float(i) + 0.5);
     vec3 p = oc + rd * t;
     float h = length(p) - P.radius;
@@ -126,46 +142,97 @@ float phaseM(float mu, float g) {
   return 0.0795775 * (1.0 - g2) / pow(1.0 + g2 - 2.0 * g * mu, 1.5);
 }
 
+// Same pattern as cloudNoise() in world/clouds.js, which places the low poly
+// puffs. Up close the puffs are the clouds and this only draws their shadows,
+// from far away this draws the clouds too. Keep the two in sync.
 float cloudDensity(Planet P, vec3 dir) {
   float a = uTime * P.cloudSpeed;
   float ca = cos(a), sa = sin(a);
   vec3 d = dir;
   d.xz = mat2(ca, -sa, sa, ca) * d.xz;
   vec3 q = d * P.cloudScale + P.cloudSeed;
-  // swirl the lookup so clouds form bands and eddies instead of blobs
-  q += 0.7 * vec3(snoise(q * 0.35), snoise(q * 0.35 + 17.0), snoise(q * 0.35 - 9.0));
-  float n = snoise(q) * 0.55 + snoise(q * 2.1 + 3.7) * 0.27 + snoise(q * 4.3 - 1.3) * 0.13 + snoise(q * 9.1) * 0.05;
-  // looser bands of weather by latitude
-  float band = 0.5 + 0.5 * sin(dir.y * 6.0 + P.cloudSeed);
+  q += 0.9 * vec3(snoise(q * 0.3), snoise(q * 0.3 + 17.0), snoise(q * 0.3 - 9.0));
+  float n = snoise(q * 0.55) * 0.5 + snoise(q * 1.2 + 3.7) * 0.33 + snoise(q * 2.6 - 1.3) * 0.17;
+  float band = 0.5 + 0.5 * sin(d.y * 6.0 + P.cloudSeed);
   float cov = P.cloudCov * mix(0.7, 1.3, band);
   float th = mix(0.45, -0.25, cov);
-  return smoothstep(th, th + 0.38, n);
+  // a little tighter than the puffs' own threshold, which only reach full size
+  // well inside a cloud, so the two cover about the same area
+  return smoothstep(th + 0.05, th + 0.15, n);
 }
 
-float waveH(vec3 q, float t, float fine) {
-  float h = snoise(q + vec3(t * 0.25, 0.0, t * 0.18)) * 0.55;
-  h += snoise(q * 2.3 + vec3(0.0, -t * 0.4, t * 0.33)) * 0.3;
-  if (fine > 0.0) h += snoise(q * 5.7 + vec3(t * 0.7, t * 0.2, 0.0)) * 0.18 * fine;
+float waveH(vec3 q, float t) {
+  float h = 0.0;
+  for (int o = 0; o < 2 + uZero; o++) {
+    float f = o == 0 ? 1.0 : 2.3;
+    vec3 drift = o == 0 ? vec3(t * 0.25, 0.0, t * 0.18) : vec3(0.0, -t * 0.4, t * 0.33);
+    h += snoise(q * f + drift) * (o == 0 ? 0.55 : 0.3);
+  }
   return h;
 }
 
-// p and n are world oriented, noise is sampled in the planet's rotating frame
+// One lattice level of the faceted water. uv is in meters on the cube face
+// plane, s is the triangle size. Returns the triangle's normal in (u, v, up).
+vec3 facetLevel(vec2 uv, float face, float s, float t) {
+  const float K = 0.8660254;
+  // skewed coordinates of an equilateral triangle lattice
+  vec2 g = vec2(uv.x - uv.y * 0.5773503, uv.y / K) / s;
+  vec2 c = floor(g);
+  vec2 f = g - c;
+  vec2 a = f.x + f.y < 1.0 ? c : c + 1.0;
+  vec2 b = c + vec2(1.0, 0.0);
+  vec2 d = c + vec2(0.0, 1.0);
+  float k = 1.0 / (s * 2.6);
+  float amp = s * 0.16;
+  vec3 P3[3];
+  for (int i = 0; i < 3 + uZero; i++) {
+    vec2 L = i == 0 ? a : i == 1 ? b : d;
+    vec2 X = vec2(L.x + L.y * 0.5, L.y * K) * s;
+    P3[i] = vec3(X, waveH(vec3(X * k, face * 7.1), t) * amp);
+  }
+  vec3 nn = normalize(cross(P3[1] - P3[0], P3[2] - P3[0]));
+  return nn.z < 0.0 ? -nn : nn;
+}
+
+// Low poly water. The surface is cut into triangles on the cube face plane
+// and each one gets a single normal from the waves at its corners. Triangles
+// grow with distance so they stay about the same size on screen, and blend
+// out to the plain sphere normal from high up where they'd just shimmer.
+// p and n are world oriented, the lattice lives in the planet's rotating frame.
 vec3 waveNormal(mat3 rot, vec3 p, vec3 n, float dist) {
-  float fade = 1.0 - smoothstep(150.0, 2200.0, dist);
-  if (fade <= 0.0) return n;
-  vec3 ta = normalize(cross(n, abs(n.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
-  vec3 tb = cross(n, ta);
-  float t = uTime;
-  vec3 q = (rot * p) * 0.18;
-  vec3 taL = rot * ta;
-  vec3 tbL = rot * tb;
-  float e = 0.12;
-  float fine = 1.0 - smoothstep(20.0, 160.0, dist);
-  float h0 = waveH(q, t, fine);
-  float hx = waveH(q + taL * e, t, fine);
-  float hy = waveH(q + tbL * e, t, fine);
-  vec3 g = (ta * (hx - h0) + tb * (hy - h0)) / e;
-  return normalize(n - g * 0.16 * fade);
+  float s = max(2.0, dist * 0.012);
+  if (s > 900.0) return n;
+  vec3 pL = rot * p;
+  vec3 a = abs(pL);
+  vec3 tuL, tvL;
+  float face, dom;
+  if (a.x >= a.y && a.x >= a.z) {
+    face = sign(pL.x); tuL = vec3(0.0, 0.0, 1.0); tvL = vec3(0.0, 1.0, 0.0); dom = a.x;
+  } else if (a.y >= a.z) {
+    face = 2.0 + sign(pL.y); tuL = vec3(1.0, 0.0, 0.0); tvL = vec3(0.0, 0.0, 1.0); dom = a.y;
+  } else {
+    face = 4.0 + sign(pL.z); tuL = vec3(1.0, 0.0, 0.0); tvL = vec3(0.0, 1.0, 0.0); dom = a.z;
+  }
+  vec2 uv = vec2(dot(pL, tuL), dot(pL, tvL)) / dom * length(pL);
+  float t = uTime * 0.6;
+  float L = log2(s / 2.0);
+  float l0 = floor(L);
+  float fl = L - l0;
+  float s0 = 2.0 * exp2(l0);
+  // blend into the next lattice size up as triangles grow with distance
+  int levels = fl > 0.02 ? 2 : 1;
+  vec3 nn = vec3(0.0);
+  for (int lv = 0; lv < levels; lv++) {
+    float w = lv == 0 ? (levels == 2 ? 1.0 - fl : 1.0) : fl;
+    nn += facetLevel(uv, face, lv == 0 ? s0 : s0 * 2.0, t) * w;
+  }
+  nn = normalize(mix(normalize(nn), vec3(0.0, 0.0, 1.0), smoothstep(250.0, 900.0, s)));
+  // lattice axes into world space, flattened onto the water
+  vec3 tu = tuL * rot;
+  vec3 tv = tvL * rot;
+  tu = normalize(tu - n * dot(tu, n));
+  tv = normalize(tv - n * dot(tv, n));
+  return normalize(tu * nn.x + tv * nn.y + n * nn.z);
 }
 
 vec3 shadeOcean(Planet P, vec3 under, vec3 hitW, vec3 rd, float tHit, float waterPath) {
@@ -176,12 +243,34 @@ vec3 shadeOcean(Planet P, vec3 under, vec3 hitW, vec3 rd, float tHit, float wate
   vec3 sunLight = uSunColor * sunT * smoothstep(-0.03, 0.08, sunUp);
   vec3 amb = P.ambient * smoothstep(-0.25, 0.3, sunUp) + uNightAmbient;
   float depthV = waterPath * max(0.08, -dot(rd, n));
+  bool lava = P.ocean > 1.5 && P.ocean < 2.5;
+  bool ice = P.ocean > 2.5 && P.ocean < 3.5;
 
-  if (P.ocean > 1.5 && P.ocean < 2.5) {
-    // lava
-    vec3 q = hitL * 0.018;
-    float n1 = fbm3(q + vec3(uTime * 0.01, 0.0, -uTime * 0.008));
-    float n2 = snoise(hitL * 0.09 + vec3(0.0, uTime * 0.05, 0.0));
+  // every mode's noise lookups in one loop, see the compile time note up top
+  vec3 np[4];
+  int count = 1;
+  if (lava) {
+    vec3 q = hitL * 0.018 + vec3(uTime * 0.01, 0.0, -uTime * 0.008);
+    np[0] = q;
+    np[1] = q * 2.03 + 11.3;
+    np[2] = q * 4.07 - 7.1;
+    np[3] = hitL * 0.09 + vec3(0.0, uTime * 0.05, 0.0);
+    count = 4;
+  } else if (ice) {
+    vec3 q = hitL * 0.03;
+    np[0] = q;
+    np[1] = q * 3.1;
+    np[2] = q * 0.3;
+    count = 3;
+  } else {
+    np[0] = hitL * 0.45 + vec3(uTime * 0.3, 0.0, 0.0);
+  }
+  float nv[4];
+  for (int i = 0; i < count; i++) nv[i] = snoise(np[i]);
+
+  if (lava) {
+    float n1 = nv[0] * 0.57 + nv[1] * 0.28 + nv[2] * 0.15;
+    float n2 = nv[3];
     float crust = smoothstep(-0.05, 0.35, n1 + n2 * 0.25);
     float pulse = 0.8 + 0.2 * sin(uTime * 1.3 + n1 * 8.0);
     vec3 hot = P.oceanShallow * 5.0 * pulse;
@@ -191,12 +280,10 @@ vec3 shadeOcean(Planet P, vec3 under, vec3 hitW, vec3 rd, float tHit, float wate
     c += P.oceanShallow * 3.0 * (1.0 - smoothstep(0.0, 1.5, depthV));
     return c;
   }
-  if (P.ocean > 2.5 && P.ocean < 3.5) {
-    // ice sheet
-    vec3 q = hitL * 0.03;
-    float cr = abs(snoise(q)) + 0.5 * abs(snoise(q * 3.1));
+  if (ice) {
+    float cr = abs(nv[0]) + 0.5 * abs(nv[1]);
     float crack = 1.0 - smoothstep(0.0, 0.08, cr);
-    vec3 ice = mix(P.oceanShallow, P.oceanDeep, crack * 0.8 + 0.2 * snoise(q * 0.3));
+    vec3 ice = mix(P.oceanShallow, P.oceanDeep, crack * 0.8 + 0.2 * nv[2]);
     vec3 hv = normalize(P.sunDir - rd);
     float spec = pow(max(dot(n, hv), 0.0), 80.0) * 0.8;
     return ice * (sunLight * max(sunUp, 0.0) * 0.9 + amb * 1.2) + sunLight * spec;
@@ -215,11 +302,63 @@ vec3 shadeOcean(Planet P, vec3 under, vec3 hitW, vec3 rd, float tHit, float wate
   vec3 c = mix(refr, skyRefl, fres);
   vec3 hv = normalize(P.sunDir - rd);
   float nh = max(dot(wn, hv), 0.0);
-  c += sunLight * (pow(nh, 600.0) * 60.0 + pow(nh, 80.0) * 0.6) * fres * 4.0;
-  float foamN = snoise(hitL * 0.45 + vec3(uTime * 0.3, 0.0, 0.0)) * 0.5 + 0.5;
+  // a whole facet lights up at once, so the tight highlight is kept small
+  c += sunLight * (pow(nh, 400.0) * 14.0 + pow(nh, 60.0) * 0.6) * fres * 4.0;
+  float foamN = nv[0] * 0.5 + 0.5;
   float foam = (1.0 - smoothstep(0.0, 0.9 + foamN, depthV)) * smoothstep(0.35, 0.7, foamN + 0.3);
   c = mix(c, vec3(0.92) * (sunLight * max(sunUp, 0.0) * 0.8 + amb), foam * 0.75);
   return c;
+}
+
+// Aurora curtains in a shell high in the atmosphere, in a band around each
+// pole, only on the night side. A short march through the near part of the
+// shell, which is the only part a player on the ground can see anyway.
+vec3 aurora(Planet P, vec3 oc, vec3 rd, float sceneDist) {
+  float h = P.atmoRadius - P.radius;
+  float r0 = P.radius + h * 0.4;
+  float r1 = P.radius + h * 0.95;
+  vec2 to = raySphere(oc, rd, r1);
+  if (to.y < 0.0) return vec3(0.0);
+  vec2 ti = raySphere(oc, rd, r0);
+  float camR = length(oc);
+  float a, b;
+  if (camR < r0) {
+    // from below: out through the inner sphere, then the outer one
+    a = ti.y;
+    b = to.y;
+  } else {
+    a = max(to.x, 0.0);
+    b = ti.y > 0.0 && ti.x > a ? ti.x : to.y;
+  }
+  b = min(b, sceneDist);
+  if (b <= a) return vec3(0.0);
+  int N = uAuroraSteps;
+  float ds = (b - a) / float(N);
+  // per pixel offset so the thin sheets don't band between samples
+  float jit = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+  vec3 sum = vec3(0.0);
+  for (int i = 0; i < N; i++) {
+    vec3 q = oc + rd * (a + ds * (float(i) + jit));
+    float r = length(q);
+    vec3 up = q / r;
+    float night = smoothstep(0.08, -0.25, dot(up, P.sunDir));
+    if (night <= 0.0) continue;
+    vec3 d = P.rot * up;
+    float lat = abs(d.y);
+    if (abs(lat - P.auroraLat) > 0.16) continue;
+    float lon = atan(d.z, d.x);
+    float hk = clamp((r - r0) / (r1 - r0), 0.0, 1.0);
+    // two thin sheets that snake along the band
+    float wa = snoise(vec3(lon * 2.5, uTime * 0.03, P.auroraLat * 10.0));
+    float wig = wa * 0.06 + snoise(vec3(lon * 9.0, uTime * 0.07, 3.0)) * 0.015;
+    float sheet = exp(-pow((lat - P.auroraLat - wig) / 0.03, 2.0)) + 0.6 * exp(-pow((lat - P.auroraLat - 0.06 - wig * 0.7) / 0.035, 2.0));
+    // vertical rays along each sheet and slow brightening and fading
+    float rays = 0.3 + 0.7 * pow(0.5 + 0.5 * sin(lon * 160.0 + snoise(vec3(lon * 25.0, uTime * 0.3, 1.0)) * 5.0), 2.0);
+    float pulse = 0.55 + 0.45 * sin(wa * 7.0 + lon * 3.0 + uTime * 0.25);
+    float vert = smoothstep(0.0, 0.1, hk) * pow(1.0 - hk, 1.8);
+    sum += mix(P.auroraC1, P.auroraC2, smoothstep(0.3, 0.95, hk)) * sheet * rays * pulse * vert * night;
+  }
+  return sum * ds * P.auroraK / h;
 }
 
 void applyPlanet(Planet P, vec3 rd, bool isSky, inout float sceneDist, inout vec3 col) {
@@ -251,10 +390,28 @@ void applyPlanet(Planet P, vec3 rd, bool isSky, inout float sceneDist, inout vec
     float rc = P.radius + P.cloudAlt;
     vec2 tc = raySphere(oc, rd, rc);
     float tHit = tc.x > 0.0 ? tc.x : tc.y;
-    if (tc.y > 0.0 && tHit < sceneDist) {
-      vec3 cp = oc + rd * tHit;
+    bool layer = tc.y > 0.0 && tHit < sceneDist && P.cloudFar > 0.0;
+    vec3 cp = oc + rd * tHit;
+    // cloud shadow: the point on the layer toward the sun from the ground
+    vec3 gp = oc + rd * sceneDist;
+    float gl = length(gp);
+    bool shadow = false;
+    vec3 sp = vec3(0.0);
+    if (!isSky && sceneDist < 1e11 && gl < rc) {
+      vec2 ts = raySphere(gp, P.sunDir, rc);
+      shadow = ts.y > 0.0;
+      sp = gp + P.sunDir * max(ts.y, 0.0);
+    }
+    // both lookups share one cloudDensity call site
+    float dens[2];
+    dens[0] = 0.0;
+    dens[1] = 0.0;
+    int first = layer ? 0 : 1;
+    int last = shadow ? 2 : 1;
+    for (int i = first; i < last; i++) dens[i] = cloudDensity(P, P.rot * normalize(i == 0 ? cp : sp));
+    if (layer) {
       vec3 up = normalize(cp);
-      float d = cloudDensity(P, P.rot * up);
+      float d = dens[0];
       if (d > 0.001) {
         // the layer is a flat shell, so hide it when seen edge-on from nearby
         float camH = length(oc) - P.radius;
@@ -263,30 +420,23 @@ void applyPlanet(Planet P, vec3 rd, bool isSky, inout float sceneDist, inout vec
         d *= mix(1.0, graze, near) * smoothstep(8.0, 60.0, abs(camH - P.cloudAlt));
         float mu = dot(up, P.sunDir);
         float lit = smoothstep(-0.15, 0.2, mu);
-        float ds = cloudDensity(P, P.rot * normalize(cp + P.sunDir * rc * 0.03));
-        float shade = 1.0 - ds * 0.5;
+        // thicker middles read darker, stands in for self shadowing
+        float shade = 1.0 - d * 0.35;
         vec3 sunT = sunTransmittance(P, cp);
         // seen from below, thick clouds are darker
         float below = step(0.0, dot(rd, up)) * d;
         float fwd = pow(max(dot(rd, P.sunDir), 0.0), 8.0) * (1.0 - d) * 1.5;
         vec3 sunC = mix(uSunColor, vec3(1.0), 0.35);
         cloudCol = P.cloudColor * (sunC * sunT * lit * (shade * 1.25 + fwd) * (1.0 - below * 0.45) + P.ambient * 0.9 * lit + uNightAmbient * 2.0);
-        alpha = d * 0.94;
+        alpha = d * 0.94 * P.cloudFar;
         tCloud = tHit;
       }
     }
-    // cloud shadows on the ground below the layer
-    if (!isSky && sceneDist < 1e11) {
-      vec3 gp = oc + rd * sceneDist;
-      float gl = length(gp);
-      if (gl < rc) {
-        vec2 ts = raySphere(gp, P.sunDir, rc);
-        if (ts.y > 0.0) {
-          vec3 sp = gp + P.sunDir * ts.y;
-          float sd = cloudDensity(P, P.rot * normalize(sp));
-          col *= 1.0 - sd * 0.5 * smoothstep(-0.1, 0.15, dot(normalize(gp), P.sunDir));
-        }
-      }
+    // cloud shadows on the ground below the layer, not on the puffs
+    // themselves, they sit right at the layer
+    if (shadow) {
+      float below = 1.0 - smoothstep(rc - 200.0, rc - 90.0, gl);
+      col *= 1.0 - dens[1] * 0.5 * below * smoothstep(-0.1, 0.15, dot(normalize(gp), P.sunDir));
     }
   }
 
@@ -301,15 +451,23 @@ void applyPlanet(Planet P, vec3 rd, bool isSky, inout float sceneDist, inout vec
   vec3 sumR = vec3(0.0), sumM = vec3(0.0);
   vec3 sumR2 = vec3(0.0), sumM2 = vec3(0.0);
   vec3 Tb = vec3(1.0);
-  if (alpha > 0.0 && tCloud > t0 && tCloud < t1) {
-    int n1 = int(clamp(float(VIEW_STEPS) * (tCloud - t0) / (t1 - t0), 3.0, float(VIEW_STEPS - 3)));
-    integrate(P, oc, rd, t0, tCloud, n1, odR, odM, sumR, sumM);
-    Tb = exp(-(P.betaR * odR + P.betaM * 1.1 * odM));
-    integrate(P, oc, rd, tCloud, t1, VIEW_STEPS - n1, odR, odM, sumR2, sumM2);
-  } else {
-    integrate(P, oc, rd, t0, t1, VIEW_STEPS, odR, odM, sumR, sumM);
-    if (alpha > 0.0) Tb = tCloud <= t0 ? vec3(1.0) : exp(-(P.betaR * odR + P.betaM * 1.1 * odM));
+  // split at the cloud layer so what's behind the cloud can be hidden by it
+  bool split = alpha > 0.0 && tCloud > t0 && tCloud < t1;
+  int n1 = split ? int(clamp(float(uViewSteps) * (tCloud - t0) / (t1 - t0), 3.0, float(uViewSteps - 3))) : uViewSteps;
+  int segs = split ? 2 : 1;
+  for (int sg = 0; sg < segs; sg++) {
+    vec3 sR = vec3(0.0), sM = vec3(0.0);
+    integrate(P, oc, rd, sg == 0 ? t0 : tCloud, sg == 0 && split ? tCloud : t1, sg == 0 ? n1 : uViewSteps - n1, odR, odM, sR, sM);
+    if (sg == 0) {
+      sumR = sR;
+      sumM = sM;
+      if (split) Tb = exp(-(P.betaR * odR + P.betaM * 1.1 * odM));
+    } else {
+      sumR2 = sR;
+      sumM2 = sM;
+    }
   }
+  if (!split && alpha > 0.0) Tb = tCloud <= t0 ? vec3(1.0) : exp(-(P.betaR * odR + P.betaM * 1.1 * odM));
   vec3 T = exp(-(P.betaR * odR + P.betaM * 1.1 * odM));
   float mu = dot(rd, P.sunDir);
   vec3 kR = P.betaR * phaseR(mu);
@@ -323,6 +481,7 @@ void applyPlanet(Planet P, vec3 rd, bool isSky, inout float sceneDist, inout vec
   // faint airglow so the night sky and far hills aren't pure black
   vec3 glow = (1.0 - T) * P.ambient * 0.07;
   col = mix(behind, cloudCol * Tb, alpha) + Ib + glow;
+  if (P.auroraK > 0.0) col += aurora(P, oc, rd, sceneDist);
 }
 
 // isnan() gets optimized out by the D3D compiler, so test the exponent bits instead
@@ -342,11 +501,14 @@ void main() {
   if (!isSky) {
     float w = exp2(d * uLogFar) - 1.0;
     sceneDist = w / max(1e-5, -rdView.z);
+    // N8AO, applied before water and haze. Past a couple hundred meters its
+    // 2 m radius is only a few pixels wide, so it fades out.
+    if (uAOStrength > 0.0) {
+      float ao = pow(texture2D(tAO, vUv).r, uAOPow);
+      col *= mix(1.0, ao, uAOStrength * (1.0 - smoothstep(100.0, 250.0, w)));
+    }
   }
-  for (int i = 0; i < MAXP; i++) {
-    if (i >= uCount) break;
-    applyPlanet(planets[i], rd, isSky, sceneDist, col);
-  }
+  for (int i = 0; i < uCount; i++) applyPlanet(planets[i], rd, isSky, sceneDist, col);
   if (uDebug > 2.5) col = badIn ? vec3(1.0, 0.0, 1.0) : bad(col) ? vec3(0.0, 1.0, 1.0) : col * 0.2;
   else if (uDebug > 1.5) col = vec3(sceneDist / 300.0);
   else if (uDebug > 0.5) col = vec3(fract(d * 10.0), fract(sceneDist / 100.0), float(uCount) * 0.25);

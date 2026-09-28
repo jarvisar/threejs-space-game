@@ -3,6 +3,27 @@ import { STAR_CLASSES, CORE_INDEX } from './galaxy.js';
 import { PLANET_TYPES, GAS_PALETTES, buildPalette, buildTerrain, roll } from './planetTypes.js';
 import { planetName, makeName } from './names.js';
 
+// Some systems have a comet, the start system always does. Own RNG so
+// systems without one generate exactly as before.
+// It sits in the inner system, well above the plane of the planets, so from
+// the planets its tail is seen from the side instead of end on. That also
+// puts it near the sun in their skies, best at dusk and dawn.
+function cometDef(systemSeed, isStart, starRadius) {
+  const rng = new RNG((systemSeed ^ 0xc0e7) >>> 0);
+  if (!isStart && !rng.chance(0.35)) return null;
+  const a = rng.range(0, Math.PI * 2);
+  const d = rng.range(30000, 50000) + starRadius * 3;
+  const incl = rng.range(1.0, 1.3) * (rng.chance(0.5) ? 1 : -1);
+  return {
+    seed: rng.seed(),
+    position: [Math.cos(a) * Math.cos(incl) * d, Math.sin(incl) * d, Math.sin(a) * Math.cos(incl) * d],
+    radius: rng.range(140, 260),
+    tail: rng.range(60000, 95000),
+    dust: rng.pick(['#fff1d6', '#ffe7c2', '#f4f0ff']),
+    ion: rng.pick(['#7fc8ff', '#8fa8ff', '#7fffe6']),
+  };
+}
+
 // Star system layout, in meters with the star at the origin. Planets don't
 // orbit. Keeping them static makes landing and on-foot physics much simpler.
 
@@ -139,7 +160,7 @@ function makeGasGiant(seed, radius) {
     atmosphere: {
       height: radius * 0.08,
       sky: [rng.range(0.4, 1), rng.range(0.4, 1), rng.range(0.6, 1)],
-      density: 0.35,
+      density: 0.24,
       mie: 0.4,
       mieG: 0.7,
     },
@@ -271,6 +292,9 @@ export function generateSystem(galaxy, starIndex, story) {
     const host = sys.planets[0];
     host.spire = { index: resonance, dir: randomDir(rng) };
   }
+
+  sys.comet = cometDef(seed, isStart, sys.star.radius);
+  if (sys.comet) sys.comet.name = `Comet ${makeName(sys.comet.seed, 2, 2)}`;
 
   const fieldCount = rng.chance(0.6) ? rng.int(1, 2) : 0;
   for (let f = 0; f < fieldCount; f++) {

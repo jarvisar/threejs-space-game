@@ -5,6 +5,7 @@ import { patchStandard } from '../render/materials.js';
 import { LAYER_POST } from '../render/pipeline.js';
 import { RESOURCES } from '../game/resources.js';
 import { surfaceNormal, findLand } from './planet.js';
+import { buildWonder, wonderKinds, wonderName, WONDERS } from './wonders.js';
 
 const _v = new THREE.Vector3();
 const Y = new THREE.Vector3(0, 1, 0);
@@ -17,6 +18,7 @@ export const POI_INFO = {
   ruin: { label: 'Chorus Ruins', color: '#ffe9b0', verb: 'Take the shard' },
   beacon: { label: 'Signal Beacon', color: '#7dffb0', verb: 'Link to the beacon' },
   spire: { label: 'Chorus Spire', color: '#ffe9b0', verb: 'Touch the spire' },
+  wonder: { label: 'Landmark', color: '#ffd98a', verb: 'Search the wreck' },
 };
 
 const WEIGHTS = {
@@ -264,8 +266,62 @@ export class PoiManager {
     const st = game.state;
     if (!st.pois[planet.def.id]) st.pois[planet.def.id] = { revealed: [], used: [], mined: {} };
     this.record = st.pois[planet.def.id];
+    // wonders the player has been close enough to see properly
+    if (!this.record.found) this.record.found = [];
     this.special = [];
     if (planet.def.spire) this.addSpire();
+    this.addWonders();
+  }
+
+  // A few big landmarks per planet on flat dry ground, spread out. Seeded by
+  // the planet so they're always in the same places.
+  addWonders() {
+    const p = this.planet;
+    const def = p.def;
+    const kinds = wonderKinds(def.type);
+    this.wonders = [];
+    if (!kinds.length) return;
+    const rng = new RNG((def.seed ^ 0xa11d) >>> 0);
+    const count = def.isMoon ? rng.int(1, 2) : rng.int(3, 5);
+    const dirs = [];
+    const hint = this.game.wonderHint ? this.game.wonderHint(p) : null;
+    const usedKinds = [];
+    const names = new Set();
+    for (let i = 0; i < count; i++) {
+      // repeat a kind only once every kind the planet allows is used
+      const fresh = kinds.filter((k) => !usedKinds.includes(k));
+      const kind = i === 0 && hint ? hint.kind : rng.pick(fresh.length ? fresh : kinds);
+      usedKinds.push(kind);
+      let dir = null;
+      const tries = i === 0 && hint ? hint.dirs.length + 60 : 60;
+      for (let t = 0; t < tries && !dir; t++) {
+        // hinted spots first, then anywhere
+        const near = i === 0 && hint && t < hint.dirs.length;
+        const d = near ? hint.dirs[t].clone() : randomDir(rng);
+        if (p.heightAt(d) < 3) continue;
+        if (surfaceNormal(p, d, 15).dot(d) < (near ? 0.9 : 0.94)) continue;
+        if (dirs.some((o) => o.dot(d) > 0.985)) continue;
+        dir = d;
+      }
+      if (!dir) continue;
+      const seed = rng.seed();
+      const poi = this.makePoi('wonder', dir, `w${i}`, seed);
+      poi.kind = kind;
+      let name = wonderName(kind, seed, def.name);
+      for (let k = 1; names.has(name) && k < 8; k++) name = wonderName(kind, seed + k * 977, def.name);
+      names.add(name);
+      poi.name = name;
+      poi.reach = WONDERS[kind].reach;
+      this.special.push(poi);
+      this.wonders.push(poi);
+      dirs.push(dir);
+    }
+    const world = this.game.state.discoveries[def.id];
+    if (world) world.wonderTotal = this.wonders.length;
+  }
+
+  isFound(poi) {
+    return this.record.found.includes(poi.id);
   }
 
   addSpire() {
@@ -349,13 +405,22 @@ export class PoiManager {
     }
     for (const poi of this.all()) {
       const d = _v.subVectors(poi.pos, local).length();
-      const far = poi.type === 'spire' ? 1e9 : 1700;
+      const far = poi.type === 'spire' ? 1e9 : poi.type === 'wonder' ? 7000 : 1700;
       if (d < far && !poi.mesh && !this.isGone(poi)) this.addMesh(poi);
       else if (poi.mesh && (d > far + 300 || this.isGone(poi))) this.dropMesh(poi);
       if (poi.mesh) {
         if (poi.spin) poi.spin.rotation.y = time * 0.6;
         if (poi.blink) poi.blink.visible = Math.sin(time * 4 + poi.seed) > -0.2;
         if (poi.beam) poi.beam.material.uniforms.uTime.value = time;
+        if (poi.anim && d < 2500) poi.anim(time);
+      }
+      if (poi.type === 'wonder') {
+        // big enough to spot by eye, so it gets a marker once it's close
+        if (d < 1600 && !this.isRevealed(poi)) this.record.revealed.push(poi.id);
+        if (d < poi.reach + 30 && !this.isFound(poi)) {
+          this.record.found.push(poi.id);
+          this.game.discoverWonder(poi, this.planet);
+        }
       }
     }
   }
@@ -378,11 +443,29 @@ export class PoiManager {
   }
 
   addMesh(poi) {
-    const m = buildMesh(poi, this.planet);
     const up = poi.dir;
-    m.position.copy(poi.pos).addScaledVector(up, -0.3);
-    m.quaternion.setFromUnitVectors(Y, up);
-    m.rotateY(new RNG(poi.seed).range(0, Math.PI * 2));
+    const q = new THREE.Quaternion().setFromUnitVectors(Y, up);
+    q.multiply(new THREE.Quaternion().setFromAxisAngle(Y, new RNG(poi.seed).range(0, Math.PI * 2)));
+    // wonders span tens of meters of uneven ground, sink them a bit more
+    const base = poi.pos.clone().addScaledVector(up, poi.type === 'wonder' ? -1.2 : -0.3);
+    let m;
+    if (poi.type === 'wonder') {
+      // ground height at a spot in the wonder's own frame, relative to its origin
+      const planet = this.planet;
+      const p = new THREE.Vector3();
+      const ground = (x, z) => {
+        p.set(x, 0, z).applyQuaternion(q).add(base);
+        const r = p.length();
+        return planet.floorRadius(p.divideScalar(r)) - r;
+      };
+      const w = buildWonder(poi.kind, poi.seed, planet.def, ground);
+      m = w.group;
+      poi.height = w.height;
+      poi.wColliders = w.colliders;
+      poi.anim = w.update || null;
+    } else m = buildMesh(poi, this.planet);
+    m.position.copy(base);
+    m.quaternion.copy(q);
     this.group.add(m);
     poi.mesh = m;
   }
@@ -398,6 +481,7 @@ export class PoiManager {
     poi.spin = null;
     poi.blink = null;
     poi.beam = null;
+    poi.anim = null;
   }
 
   // scanner reveal, returns newly revealed pois
@@ -417,6 +501,11 @@ export class PoiManager {
     const out = [];
     for (const poi of this.all()) {
       if (!this.isRevealed(poi) || this.isGone(poi)) continue;
+      if (poi.type === 'wonder') {
+        // found wonders keep a marker, except a searched wreck
+        if (poi.kind !== 'wreck' || !this.isUsed(poi)) out.push(poi);
+        continue;
+      }
       if (poi.type !== 'deposit' && poi.type !== 'spire' && this.isUsed(poi)) continue;
       out.push(poi);
     }
@@ -426,7 +515,7 @@ export class PoiManager {
   raycast(origin, dir, range) {
     let best = null;
     for (const poi of this.all()) {
-      if (!poi.mesh) continue;
+      if (!poi.mesh || poi.type === 'wonder') continue;
       const up = poi.dir;
       const c = _v.copy(poi.pos).addScaledVector(up, Math.min(poi.height * 0.45, 3));
       const r = poi.type === 'spire' ? 5 : poi.type === 'deposit' ? 2.8 : 1.6;
@@ -446,7 +535,9 @@ export class PoiManager {
     let bd = maxDist;
     for (const poi of this.all()) {
       if (poi.type === 'deposit' || !poi.mesh) continue;
-      const d = _v.subVectors(poi.pos, local).length() - (poi.type === 'spire' ? 10 : poi.type === 'ruin' ? 3 : 0);
+      // of the wonders only the wreck has anything to search
+      if (poi.type === 'wonder' && poi.kind !== 'wreck') continue;
+      const d = _v.subVectors(poi.pos, local).length() - (poi.type === 'spire' ? 10 : poi.type === 'ruin' ? 3 : poi.type === 'wonder' ? 14 : 0);
       if (d < bd) {
         bd = d;
         best = poi;
@@ -457,6 +548,7 @@ export class PoiManager {
 
   describe(poi) {
     const info = POI_INFO[poi.type];
+    if (poi.type === 'wonder') return { name: poi.name, sub: this.isUsed(poi) ? 'Already searched' : 'Press E to search' };
     if (poi.type === 'deposit') {
       const left = poi.amount - (this.record.mined[poi.id] || 0);
       return { name: `${RESOURCES[poi.res].name} Deposit`, sub: `${left} units remaining` };
@@ -489,6 +581,15 @@ export class PoiManager {
 
   collidersNear(local, r, out) {
     for (const poi of this.all()) {
+      if (poi.wColliders && poi.mesh) {
+        if (_v.subVectors(poi.pos, local).length() > r + poi.reach + 20) continue;
+        for (const c of poi.wColliders) {
+          const lp = new THREE.Vector3(c.x, c.y || 0, c.z).applyQuaternion(poi.mesh.quaternion).add(poi.mesh.position);
+          if (_v.subVectors(lp, local).length() > r + c.r + 4) continue;
+          out.push({ pos: lp, radius: c.r, height: c.h + 1.2 });
+        }
+        continue;
+      }
       if (!poi.mesh || !poi.colRadius) continue;
       if (_v.subVectors(poi.pos, local).length() > r + 10) continue;
       out.push({ pos: poi.pos, radius: poi.colRadius, height: poi.height });
@@ -506,4 +607,11 @@ export class PoiManager {
     for (const poi of this.all()) this.dropMesh(poi);
     this.planet.group.remove(this.group);
   }
+}
+
+function randomDir(rng) {
+  const z = rng.range(-0.85, 0.85);
+  const t = rng.range(0, Math.PI * 2);
+  const r = Math.sqrt(1 - z * z);
+  return new THREE.Vector3(r * Math.cos(t), z, r * Math.sin(t));
 }

@@ -3,6 +3,7 @@ import { Planet } from './planet.js';
 import { GasGiant } from './gasGiant.js';
 import { Star } from './star.js';
 import { createRings } from './rings.js';
+import { Comet } from './comet.js';
 import { MAX_ATMO_PLANETS } from '../render/shaders/atmosphere.glsl.js';
 
 const _v = new THREE.Vector3();
@@ -23,6 +24,8 @@ export class StarSystem {
       scene.add(b.group);
       return b;
     });
+    this.comet = def.comet ? new Comet(def.comet, def.comet.name) : null;
+    if (this.comet) scene.add(this.comet.group);
     this.focus = null;
   }
 
@@ -32,6 +35,7 @@ export class StarSystem {
 
   update(camWorld, time) {
     this.star.update(time);
+    if (this.comet) this.comet.update(time);
     let best = null;
     let bestScore = Infinity;
     for (const b of this.bodies) {
@@ -53,6 +57,7 @@ export class StarSystem {
 
   updateRender(origin) {
     this.star.updateRender(origin);
+    if (this.comet) this.comet.updateRender(origin);
     for (const b of this.bodies) b.updateRender(origin);
   }
 
@@ -77,6 +82,10 @@ export class StarSystem {
   dispose() {
     this.scene.remove(this.star.group);
     this.star.dispose();
+    if (this.comet) {
+      this.scene.remove(this.comet.group);
+      this.comet.dispose();
+    }
     for (const b of this.bodies) {
       this.scene.remove(b.group);
       b.dispose();

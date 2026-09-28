@@ -39,7 +39,12 @@ export function initPwa() {
   });
   // an installed app can ask for storage the browser won't clear on its own, which keeps the save safe
   if (matchMedia('(display-mode: standalone)').matches) navigator.storage?.persist?.().catch(() => {});
+}
 
+// Called once the title screen is up. Installing the worker downloads the
+// whole build again for the cache, which we don't want competing with the
+// first load for bandwidth.
+export function registerServiceWorker() {
   if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (reloading) location.reload();

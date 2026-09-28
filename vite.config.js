@@ -42,5 +42,15 @@ export default defineConfig({
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 2000,
+    rolldownOptions: {
+      output: {
+        // three.js in its own file. It's most of the bundle and rarely changes,
+        // so after a deploy browsers and the service worker keep their copy and
+        // only download the game code again.
+        codeSplitting: {
+          groups: [{ name: 'three', test: /node_modules[\\/]three[\\/]/ }],
+        },
+      },
+    },
   },
 });

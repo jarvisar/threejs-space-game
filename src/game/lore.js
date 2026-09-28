@@ -86,3 +86,28 @@ export function echoText(seed, planetName, systemName) {
   const t = rng.pick(THOUGHTS).replace('{planet}', planetName).replace('{system}', systemName);
   return [open, `<i>${t}</i>`];
 }
+
+const WRECK_OPENERS = [
+  'The flight recorder still has power. The last entry plays back in pieces.',
+  'A cracked terminal in the cockpit wakes up when you touch it.',
+  'You find the captain\u2019s log wedged under a seat.',
+  'The ship\u2019s computer greets you by someone else\u2019s name, then plays its last log.',
+];
+
+const WRECK_LOGS = [
+  'Engines failed on approach. We came down hard, but the hull held. Nav says the signal is louder here than anywhere we have been.',
+  'Day forty. The crew wants to go home. I told them the song is home. They did not like that.',
+  'We followed a pillar of light down through the clouds and lost it at the tree line. Setting down to look.',
+  'Cargo manifest: ferrite, hydrogel, one crate marked only with a spiral. Do not open the crate.',
+  'Whoever finds this, take the cells. We will not need them.',
+  'The drive kept tuning itself to a note none of us could hear. Then it stopped, and so did we.',
+  'Mapped {planet} for three weeks before the storm caught us. Most of it is still unnamed. Name it for us.',
+  'I can hear the stones at night. They sound like someone humming a song they only half remember.',
+  'We were never meant to land here. The landmarks looked like a map from orbit. They still do.',
+];
+
+export function wreckLog(seed, name, planetName = 'this world') {
+  const rng = new RNG(seed ^ 0x51de);
+  const log = rng.pick(WRECK_LOGS).replace('{planet}', planetName);
+  return [rng.pick(WRECK_OPENERS), `<i>${log}</i>`, 'The cargo hold still has some supplies in it.'];
+}
