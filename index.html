@@ -72,8 +72,8 @@
         font-family: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
       }
 
-      /* Matches the title screen (.title-inner, .title-name, .title-tag in
-         menus.css) so the wordmark stays put when the title fades in. The
+      /* Matches the title screen (.title-inner and .title-name in menus.css)
+         so the wordmark stays put when the title fades in. The
          110px block is where the buttons, save line and seed input go. */
       #boot {
         position: fixed;
@@ -104,15 +104,9 @@
         font-weight: 300;
         letter-spacing: 0.42em;
         margin-right: -0.42em;
+        margin-bottom: 36px;
         color: #f4f8ff;
         text-shadow: 0 0 40px rgba(140, 210, 255, 0.45);
-      }
-      .boot-tag {
-        font-size: 18px;
-        letter-spacing: 0.35em;
-        text-transform: uppercase;
-        color: #7fe0ff;
-        margin: 4px 0 36px;
       }
       .boot-load {
         height: 110px;
@@ -159,8 +153,7 @@
       #boot.mini.done {
         transition: opacity 0.5s, visibility 0s 0.5s;
       }
-      #boot.mini .boot-name,
-      #boot.mini .boot-tag {
+      #boot.mini .boot-name {
         visibility: hidden;
       }
       /* the title gets the same zoom from --z in style.css on big screens */
@@ -247,7 +240,6 @@
     <div id="boot" aria-hidden="true">
       <div class="boot-inner">
         <div class="boot-name">STARSONG</div>
-        <div class="boot-tag">Follow the Chorus to the heart of the galaxy</div>
         <div class="boot-load">
           <div class="boot-bar"><i></i></div>
           <div class="boot-label">Loading</div>

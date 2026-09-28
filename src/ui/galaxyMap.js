@@ -558,7 +558,7 @@ export class GalaxyMap {
       const isGoal = i === this.goalStar();
       let why = err || '';
       if (!why) {
-        if (!allowed) why = `Your drive cannot hold ${cls.label.toLowerCase()}s yet.`;
+        if (!allowed) why = `Your drive can't reach ${cls.label.toLowerCase()}s yet.`;
         else if (!inRange) why = this.plan ? '' : `No route within ${Math.round(s.warpRange)} ly jumps from here.`;
         else if (st.warpCells < 1) why = 'You need a Warp Cell. Craft one from Hydrogel and Ferrite.';
         else if (blocker) why = blocker;

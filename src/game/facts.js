@@ -57,7 +57,7 @@ export function worldFacts(body) {
     rows.push(['Life', flora + fauna ? `${flora} flora, ${fauna} fauna` : 'None found']);
     if (def.resource) rows.push(['Resource', RESOURCES[def.resource].name]);
   } else {
-    rows.push(['Storms', def.storm ? 'One great storm' : 'Calm bands']);
+    rows.push(['Storms', def.storm ? 'One large storm' : 'None']);
   }
   if (def.rings) tags.push('Rings');
   if (def.isMoon) tags.push('Moon');

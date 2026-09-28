@@ -151,16 +151,9 @@
   font-weight: 300;
   letter-spacing: 0.42em;
   margin-right: -0.42em;
+  margin-bottom: 36px;
   color: #f4f8ff;
   text-shadow: 0 0 40px rgba(140, 210, 255, 0.45);
-}
-.title-tag {
-  font-size: 18px;
-  letter-spacing: 0.35em;
-  text-transform: uppercase;
-  color: var(--accent);
-  margin: 4px 0 36px;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
 }
 .title-buttons {
   display: flex;

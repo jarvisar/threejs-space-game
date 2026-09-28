@@ -41,47 +41,47 @@ export class Story {
     switch (this.s.stage) {
       case 'repair':
         if (inv.ferrite >= REPAIR.ferrite && inv.carbon >= REPAIR.carbon)
-          return { title: 'Stranded', text: 'You have what you need. Return to your ship and press <b>E</b> to repair the launch thrusters.' };
+          return { title: 'Repair Your Ship', text: 'Return to your ship and press <b>E</b> to repair the launch thrusters.' };
         return {
-          title: 'Stranded',
+          title: 'Repair Your Ship',
           text: `Your launch thrusters are damaged. Hold <b>Left Mouse</b> to mine.<br>Ferrite from rocks ${k('ferrite', REPAIR.ferrite)}<br>Carbon from plants ${k('carbon', REPAIR.carbon)}`,
         };
       case 'launch':
-        return { title: 'Lift Off', text: 'Board your ship, press <b>W</b> to take off, then climb out of the atmosphere.' };
+        return { title: 'Take Off', text: 'Board your ship, press <b>W</b> to take off, then climb out of the atmosphere.' };
       case 'explore':
-        return { title: 'Open Space', text: 'Press <b>Space</b> away from planets to engage the pulse drive. Fly to another world and land on it.' };
+        return { title: 'Land on Another Planet', text: 'Press <b>Space</b> away from planets to use the pulse drive. Fly to another planet and land on it.' };
       case 'fuel': {
         const cells = st.warpCells;
         return {
-          title: 'Warp Fuel',
-          text: `Warp jumps burn Warp Cells. Mine <b>Hydrogel</b> from blue crystals, then craft a cell in the inventory (<b>Tab</b>).<br>Hydrogel ${k('hydrogel', WARP_CELL.hydrogel)} Ferrite ${k('ferrite', WARP_CELL.ferrite)}<br>Warp Cells ${cells}/1`,
+          title: 'Craft a Warp Cell',
+          text: `Warp jumps use Warp Cells. Mine <b>Hydrogel</b> from blue crystals, then craft a cell in the inventory (<b>Tab</b>).<br>Hydrogel ${k('hydrogel', WARP_CELL.hydrogel)} Ferrite ${k('ferrite', WARP_CELL.ferrite)}<br>Warp Cells ${cells}/1`,
         };
       }
       case 'signal': {
         const idx = this.s.resonance;
         const star = this.resonanceStar(idx);
-        if (star === undefined) return { title: 'The Heart', text: 'Craft a <b>Harmonic Lens</b> (Tab), then open the galaxy map and make the <b>Core Jump</b>.' };
+        if (star === undefined) return { title: 'Core Jump', text: 'Craft a <b>Harmonic Lens</b> (Tab), then open the galaxy map and make the <b>Core Jump</b>.' };
         const info = g.galaxy.info(star);
         const s = stats(st);
         const tierOk = s.warpClasses.includes(info.cls);
-        const extra = tierOk ? '' : `<br>Your drive cannot hold ${STAR_CLASSES[info.cls].label.toLowerCase()}s yet. Install the next drive upgrade.`;
+        const extra = tierOk ? '' : `<br>Your drive can't reach ${STAR_CLASSES[info.cls].label.toLowerCase()}s yet. Install the next drive upgrade.`;
         return {
-          title: idx === 0 ? 'The Signal' : 'Follow the Chorus',
-          text: `A signal repeats from <b>${info.name}</b>. Open the galaxy map (<b>G</b>) and warp to the marked star. Distant stars may take several jumps.${extra}`,
+          title: `Signal ${idx + 1} of ${g.galaxy.story.resonances.length}`,
+          text: `The signal is coming from <b>${info.name}</b>. Open the galaxy map (<b>G</b>) and warp to the marked star. Distant stars may take several jumps.${extra}`,
         };
       }
       case 'spire': {
         const host = g.system.bodies.find((b) => b.def.spire);
-        return { title: 'The Spire', text: `Find the Chorus Spire on <b>${host ? host.def.name : 'a nearby world'}</b>. Look for the pillar of light.` };
+        return { title: 'Find the Spire', text: `Find the Chorus Spire on <b>${host ? host.def.name : 'a nearby world'}</b>. Look for the pillar of light.` };
       }
       case 'upgrade': {
         const next = UPGRADES.drive.levels[level(st, 'drive') - 1];
-        return { title: 'New Harmonic', text: `Install the <b>${next ? next.name : 'next drive'}</b> from the Upgrades tab (<b>Tab</b>). Relic Shards come from Echo Stones and ruins.` };
+        return { title: 'Upgrade Your Drive', text: `Install the <b>${next ? next.name : 'next drive'}</b> from the Upgrades tab (<b>Tab</b>). Relic Shards come from Echo Stones and ruins.` };
       }
       case 'core':
-        return { title: 'The Heart', text: 'Craft a <b>Harmonic Lens</b> (Tab), then open the galaxy map and make the <b>Core Jump</b>.' };
+        return { title: 'Core Jump', text: 'Craft a <b>Harmonic Lens</b> (Tab), then open the galaxy map and make the <b>Core Jump</b>.' };
       case 'end':
-        return { title: 'Wayfarer', text: 'The song is complete. The galaxy is yours to wander.' };
+        return { title: 'Story Complete', text: 'You reached the core. Keep exploring, or start a new galaxy from the title screen.' };
     }
     return null;
   }

@@ -1,113 +1,83 @@
 import { RNG } from '../core/rng.js';
 
-// Story text for the resonant spires and the ending, plus the procedural
-// echoes recorded in Echo Stones.
+// Story text for the spires and the ending, plus the random logs in Echo
+// Stones, ruins and wrecks.
 
 export const RESONANCES = [
   {
-    title: 'First Resonance',
+    title: 'First Spire',
     text: [
-      'The spire wakes as you walk up to it. Light runs up its faces and a low tone fills the valley. You feel it in your chest more than you hear it.',
-      'A fragment settles into words: <i>The song was broken into pieces so it could travel. Carry the pieces home.</i>',
-      'Your drive logs a new harmonic, one your engines cannot hold yet. The pattern for a colder drive is written into the stone.',
+      'The spire activated and played a message: <i>Follow the spires to the center of the galaxy.</i>',
+      'The next signal needs the Frost Drive. Install it from the Upgrades tab.',
     ],
   },
   {
-    title: 'Second Resonance',
+    title: 'Second Spire',
     text: [
-      'This spire sings higher than the first. The Chorus has more to say now that it knows someone is listening.',
-      '<i>Every star is a note. Every world is a rest between notes. We sang the first light, and the light forgot us.</i>',
-      'A second harmonic settles into your drive. It wants to go somewhere bluer and louder.',
+      'Another message: <i>We built the spires so someone would find their way back to us.</i>',
+      'The next signal needs the Azure Drive. Install it from the Upgrades tab.',
     ],
   },
   {
-    title: 'Third Resonance',
+    title: 'Third Spire',
     text: [
-      'The blue giant bends the signal, but the spire holds it steady. This time the Chorus sends images instead of words.',
-      'Ships like yours, thousands of them, following the same pillars of light long before your people first looked up. All of them turned toward the center. None came back to say what they found.',
-      'The last pattern is strange. It only makes sense near stars that should not exist.',
+      'This spire showed images instead of words. Thousands of ships followed the spires toward the core long before you. None of them came back.',
+      'The last signal needs the Chorus Drive. Install it from the Upgrades tab.',
     ],
   },
   {
-    title: 'Final Resonance',
+    title: 'Final Spire',
     text: [
-      'Under the anomalous star the spire looks alive. The last harmonic is loud enough to shake dust off the stone.',
-      '<i>Come to the heart. Finish the song.</i>',
-      'Your drive can reach the galactic core now, if you focus it. Craft a Harmonic Lens and make the Core Jump from the galaxy map.',
+      'The last message: <i>Come to the core. Finish the song.</i>',
+      'Craft a Harmonic Lens, then make the Core Jump from the galaxy map.',
     ],
   },
 ];
 
 export const ENDING = {
-  title: 'The Heart of the Chorus',
+  title: 'The Core',
   text: [
-    'The core is not a black hole. It is a chord of light, still ringing from the first moment of everything.',
-    'Your hull hums in tune with it. For a moment you hear every world you walked on, every plant you catalogued, every stone that spoke to you, all at once.',
-    'The Chorus was never lost. It was waiting for someone to listen from the outside.',
-    'Somewhere far from here, a new galaxy begins to sing.',
+    'You reached the center of the galaxy. This is where the Chorus signal comes from.',
+    'The Chorus was never lost. It was waiting for someone to follow the spires all the way in.',
   ],
 };
 
-const OPENERS = [
-  'A traveler left a log in this stone.',
-  'A recorded voice, patient and tired:',
-  'The stone hums, then plays back a message.',
-  'Glyphs rearrange themselves into something your visor can read.',
-  'An old recording, half eaten by static:',
-  'The stone remembers someone who stood here before you.',
-];
-
-const THOUGHTS = [
-  'I followed the pillars of light until my fuel ran thin. The song got louder every time.',
-  'The plants here hum at night. I think they learned the tune from the stones.',
-  'We named this world {planet}. It never answered to the name.',
-  'Every stone I find is older than the last. Someone planted a trail.',
-  'The center of the galaxy is quieter than it should be. Like an instrument waiting for a hand.',
-  'Stay away from blue stars until your drive is ready. They sing so loud you cannot hear yourself think.',
-  'Every living thing on this world grows toward the core. I checked.',
-  'The storms here come in rhythm. Count them. Four beats, then silence.',
-  'If you are reading this, you hear it too.',
-  'My drive started humming in a key I do not recognize.',
-  'In the old language there is one word for both star and note.',
-  'The ruins face the same way on every world. Toward the heart.',
-  'I left the settlements to find the source. They called it madness. It feels more like homesickness.',
-  'Carbon, ferrite, a little hydrogel. That is all a life needs out here. That and the song.',
-  'The Wayfarers before me left these stones as tuning forks.',
-  'Some nights the sky over {system} looks like a stave of music.',
-  'I do not think the Chorus is a message. I think it is a mind, and it is waking up.',
-  'Mine what you need and leave the rest. The worlds remember.',
-  'The spires only wake for people who have been listening.',
-  'I found a moon where the rocks sing back when you shoot them. I stopped mining there.',
+const LOGS = [
+  'Followed the spires until my fuel ran low. The signal got stronger at each one.',
+  'Named this planet {planet}. Staying a few days to map it.',
+  'Every Echo Stone I find is older than the last one.',
+  'Stay away from blue stars until your drive is upgraded.',
+  'Storms drain your suit fast. Stay near the ship when one starts.',
+  'Ferrite, carbon and a bit of hydrogel. That covers most of what you need out here.',
+  'Someone left these stones on purpose. They all point to the same signal.',
+  'Mine what you need and move on. The next planet will have more.',
+  'Lost my ship on {planet}. Took me two days to find it again.',
+  'Best night sky I have seen so far is over {system}.',
+  'I think the Chorus is alive. The spires only turn on when someone gets close.',
+  'Found a moon full of cobalt. Stayed a week mining it.',
+  'You can see the spires from orbit. Look for a beam of light.',
+  'Glowing plants have Lumen in them. Keep some for your shield.',
+  'If you found this stone, you picked up the signal too.',
 ];
 
 export function echoText(seed, planetName, systemName) {
   const rng = new RNG(seed);
-  const open = rng.pick(OPENERS);
-  const t = rng.pick(THOUGHTS).replace('{planet}', planetName).replace('{system}', systemName);
-  return [open, `<i>${t}</i>`];
+  const t = rng.pick(LOGS).replace('{planet}', planetName).replace('{system}', systemName);
+  return [`<i>${t}</i>`];
 }
 
-const WRECK_OPENERS = [
-  'The flight recorder still has power. The last entry plays back in pieces.',
-  'A cracked terminal in the cockpit wakes up when you touch it.',
-  'You find the captain\u2019s log wedged under a seat.',
-  'The ship\u2019s computer greets you by someone else\u2019s name, then plays its last log.',
-];
-
 const WRECK_LOGS = [
-  'Engines failed on approach. We came down hard, but the hull held. Nav says the signal is louder here than anywhere we have been.',
-  'Day forty. The crew wants to go home. I told them the song is home. They did not like that.',
-  'We followed a pillar of light down through the clouds and lost it at the tree line. Setting down to look.',
-  'Cargo manifest: ferrite, hydrogel, one crate marked only with a spiral. Do not open the crate.',
-  'Whoever finds this, take the cells. We will not need them.',
-  'The drive kept tuning itself to a note none of us could hear. Then it stopped, and so did we.',
-  'Mapped {planet} for three weeks before the storm caught us. Most of it is still unnamed. Name it for us.',
-  'I can hear the stones at night. They sound like someone humming a song they only half remember.',
-  'We were never meant to land here. The landmarks looked like a map from orbit. They still do.',
+  'Engines failed on approach and we came down hard. The signal is stronger here than anywhere we have been.',
+  'Day forty. The crew wants to go home. I want to keep following the signal.',
+  'Followed a beam of light down to the surface and lost it. Landing to look for it.',
+  'Cargo: ferrite, hydrogel, and one crate with a spiral on it. Do not open the crate.',
+  'Whoever finds this, take what is left in the hold. We will not need it.',
+  'The drive kept retuning itself, then shut down. We could not restart it.',
+  'Spent three weeks mapping {planet} before a storm brought us down.',
+  'The Echo Stones here hum at night. Nobody on the crew can sleep.',
 ];
 
 export function wreckLog(seed, name, planetName = 'this world') {
   const rng = new RNG(seed ^ 0x51de);
-  const log = rng.pick(WRECK_LOGS).replace('{planet}', planetName);
-  return [rng.pick(WRECK_OPENERS), `<i>${log}</i>`, 'The cargo hold still has some supplies in it.'];
+  return [`<i>${rng.pick(WRECK_LOGS).replace('{planet}', planetName)}</i>`];
 }

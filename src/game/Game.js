@@ -1519,7 +1519,7 @@ export class Game {
     this.flushGains();
     switch (poi.type) {
       case 'monolith': {
-        if (used) return this.hud.message('The stone is silent');
+        if (used) return this.hud.message('Echo Stone already used');
         pois.markUsed(poi);
         const text = echoText(poi.seed, planet.def.name, this.systemDef.name);
         this.state.lore.push({ title: 'Echo Stone', text });
@@ -1531,10 +1531,9 @@ export class Game {
         break;
       }
       case 'ruin': {
-        if (used) return this.hud.message('Only rubble remains');
+        if (used) return this.hud.message('Ruins already searched');
         pois.markUsed(poi);
         const text = echoText(poi.seed + 7, planet.def.name, this.systemDef.name);
-        text.unshift('The shard at the center of the ruins dims as you take it.');
         this.state.lore.push({ title: 'Chorus Ruins', text });
         this.gain('relic', 2, true);
         this.state.data += 60;
@@ -1544,7 +1543,7 @@ export class Game {
         break;
       }
       case 'cache': {
-        if (used) return this.hud.message('The pod is empty');
+        if (used) return this.hud.message('Supply pod already opened');
         pois.markUsed(poi);
         const rng = Math.random;
         const pool = ['ferrite', 'carbon', 'hydrogel', 'lumen', planet.def.resource];
@@ -1559,7 +1558,7 @@ export class Game {
         break;
       }
       case 'wonder': {
-        if (used) return this.hud.message('Nothing left aboard');
+        if (used) return this.hud.message('Wreck already searched');
         pois.markUsed(poi);
         const text = wreckLog(poi.seed, poi.name, planet.def.name);
         this.state.lore.push({ title: poi.name, text });
@@ -1577,11 +1576,11 @@ export class Game {
         break;
       }
       case 'beacon': {
-        if (used) return this.hud.message('The beacon has nothing new');
+        if (used) return this.hud.message('Beacon already used');
         pois.markUsed(poi);
         const fresh = pois.reveal(this.walker.pos, 5000, ['monolith', 'ruin', 'cache']);
         this.audio.ping();
-        this.hud.message('Beacon uplink complete', 2000);
+        this.hud.message('Beacon scan complete', 2000);
         this.reportScan(fresh);
         break;
       }
@@ -1589,7 +1588,7 @@ export class Game {
         const i = poi.story;
         if (!this.story.onSpire(poi)) {
           this.audio.chorus();
-          return this.hud.message('The spire hums quietly');
+          return this.hud.message(i < this.state.story.resonance ? 'Spire already activated' : 'Spire not active yet');
         }
         const r = RESONANCES[Math.min(i, RESONANCES.length - 1)];
         this.state.lore.push({ title: r.title, text: r.text });
@@ -1662,7 +1661,7 @@ export class Game {
   die() {
     if (this.dying) return;
     this.dying = true;
-    this.menus.deathText.textContent = 'You wake up back at your ship. Some cargo was lost.';
+    this.menus.deathText.textContent = 'Respawned at your ship. Some cargo was lost.';
     this.menus.open('death');
     this.menuOpen = 'death';
     this.paused = true;
@@ -1723,7 +1722,7 @@ export class Game {
     let err = this.warpBlocker();
     if (st.warpCells < 1) err = 'No Warp Cells.';
     else if (this.galaxy.dist(st.systemIndex, star) > s.warpRange) err = 'Out of range.';
-    else if (!s.warpClasses.includes(this.galaxy.classOf(star))) err = 'Your drive cannot hold that star yet.';
+    else if (!s.warpClasses.includes(this.galaxy.classOf(star))) err = "Your drive can't reach that star yet.";
     if (err) {
       this.audio.error();
       this.map.renderInfo(err);

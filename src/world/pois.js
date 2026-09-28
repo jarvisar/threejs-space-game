@@ -12,13 +12,13 @@ const Y = new THREE.Vector3(0, 1, 0);
 
 // verb is the E prompt, deposits are mined instead
 export const POI_INFO = {
-  monolith: { label: 'Echo Stone', color: '#c9a2ff', verb: 'Listen to the Echo Stone' },
+  monolith: { label: 'Echo Stone', color: '#c9a2ff', verb: 'Activate Echo Stone' },
   deposit: { label: 'Deposit', color: '#7fe0ff' },
-  cache: { label: 'Supply Pod', color: '#ffb45e', verb: 'Open the supply pod' },
-  ruin: { label: 'Chorus Ruins', color: '#ffe9b0', verb: 'Take the shard' },
-  beacon: { label: 'Signal Beacon', color: '#7dffb0', verb: 'Link to the beacon' },
-  spire: { label: 'Chorus Spire', color: '#ffe9b0', verb: 'Touch the spire' },
-  wonder: { label: 'Landmark', color: '#ffd98a', verb: 'Search the wreck' },
+  cache: { label: 'Supply Pod', color: '#ffb45e', verb: 'Open supply pod' },
+  ruin: { label: 'Chorus Ruins', color: '#ffe9b0', verb: 'Take shard' },
+  beacon: { label: 'Signal Beacon', color: '#7dffb0', verb: 'Use beacon' },
+  spire: { label: 'Chorus Spire', color: '#ffe9b0', verb: 'Activate spire' },
+  wonder: { label: 'Landmark', color: '#ffd98a', verb: 'Search wreck' },
 };
 
 const WEIGHTS = {

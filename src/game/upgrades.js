@@ -6,16 +6,16 @@ export const UPGRADES = {
     name: 'Warp Drive',
     icon: 'drive',
     levels: [
-      { name: 'Frost Drive', desc: 'Tunes the drive for white stars. Warp range 120 ly.', cost: { relic: 3, cryonite: 50, ferrite: 120, data: 150 } },
-      { name: 'Azure Drive', desc: 'Survives the gravity wells of blue giants. Warp range 200 ly.', cost: { relic: 3, uranite: 50, cobalt: 60, data: 300 } },
-      { name: 'Chorus Drive', desc: 'Resonates with anomalous stars. Warp range 320 ly.', cost: { relic: 4, pyrocite: 50, vitriol: 50, verdite: 50, data: 500 } },
+      { name: 'Frost Drive', desc: 'Warp to white stars. Range 120 ly.', cost: { relic: 3, cryonite: 50, ferrite: 120, data: 150 } },
+      { name: 'Azure Drive', desc: 'Warp to blue giants. Range 200 ly.', cost: { relic: 3, uranite: 50, cobalt: 60, data: 300 } },
+      { name: 'Chorus Drive', desc: 'Warp to anomalous stars. Range 320 ly.', cost: { relic: 4, pyrocite: 50, vitriol: 50, verdite: 50, data: 500 } },
     ],
   },
   scanner: {
     name: 'Scanner',
     levels: [
-      { name: 'Wide Band Scanner', desc: 'Scan range 1.8 km and reveals more sites.', cost: { ferrite: 60, carbon: 40, data: 60 } },
-      { name: 'Deep Echo Scanner', desc: 'Scan range 3 km. Echo Stones light up from farther away.', cost: { cobalt: 30, lumen: 40, data: 160 } },
+      { name: 'Wide Band Scanner', desc: 'Scan range 1.8 km.', cost: { ferrite: 60, carbon: 40, data: 60 } },
+      { name: 'Deep Echo Scanner', desc: 'Scan range 3 km.', cost: { cobalt: 30, lumen: 40, data: 160 } },
     ],
   },
   mining: {
@@ -102,7 +102,7 @@ export function stats(state) {
 }
 
 export const RECIPES = [
-  { id: 'warpcell', name: 'Warp Cell', desc: 'Fuel for one hyperspace jump.', cost: { hydrogel: 40, ferrite: 20 } },
-  { id: 'shield', name: 'Shield Charge', desc: 'Refills hazard protection right away.', cost: { lumen: 15, carbon: 5 } },
-  { id: 'lens', name: 'Harmonic Lens', desc: 'Focuses the Chorus Drive for the jump to the galactic core.', cost: { aetherium: 40, relic: 3, hydrogel: 60 }, story: true },
+  { id: 'warpcell', name: 'Warp Cell', desc: 'Fuel for one warp jump.', cost: { hydrogel: 40, ferrite: 20 } },
+  { id: 'shield', name: 'Shield Charge', desc: 'Refills your hazard shield.', cost: { lumen: 15, carbon: 5 } },
+  { id: 'lens', name: 'Harmonic Lens', desc: 'Lets the Chorus Drive jump to the galactic core.', cost: { aetherium: 40, relic: 3, hydrogel: 60 }, story: true },
 ];

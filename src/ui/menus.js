@@ -59,10 +59,9 @@ export class Menus {
     const t = el('div', 'screen title-screen', this.root);
     const inner = el('div', 'title-inner', t);
     el('div', 'title-name', inner, 'STARSONG');
-    el('div', 'title-tag', inner, 'Follow the Chorus to the heart of the galaxy');
     const btns = el('div', 'title-buttons', inner);
     this.btnContinue = el('button', 'btn primary', btns, 'Continue');
-    this.btnNew = el('button', 'btn', btns, 'New Journey');
+    this.btnNew = el('button', 'btn', btns, 'New Game');
     this.btnControls = el('button', 'btn', btns, 'Controls');
     this.saveInfo = el('div', 'save-info', inner);
     const seedRow = el('label', 'seed-row', inner);
@@ -130,7 +129,7 @@ export class Menus {
   resetNewJourney() {
     clearTimeout(this.confirmT);
     this.confirmNew = false;
-    this.btnNew.textContent = 'New Journey';
+    this.btnNew.textContent = 'New Game';
     this.btnNew.classList.remove('warn');
     this.saveInfo.classList.remove('warn');
     this.saveInfo.textContent = this.save ? `${this.save.system} · ${fmtPlayTime(this.save.playTime)} played` : '';
@@ -278,7 +277,7 @@ export class Menus {
     const worlds = Object.values(st.discoveries);
     const wonders = st.wonders || [];
     const stat = (n, what) => `<div class="j-stat"><b>${n}</b><span>${what}</span></div>`;
-    let h = `<div class="j-stats">${stat(st.visited.length, 'Systems')}${stat(worlds.length, 'Worlds')}${stat(species.length, 'Species')}${stat(wonders.length, 'Landmarks')}${stat(st.lore.length, 'Echoes')}${stat(fmtPlayTime(st.playTime), 'Played')}</div>`;
+    let h = `<div class="j-stats">${stat(st.visited.length, 'Systems')}${stat(worlds.length, 'Worlds')}${stat(species.length, 'Species')}${stat(wonders.length, 'Landmarks')}${stat(st.lore.length, 'Logs')}${stat(fmtPlayTime(st.playTime), 'Played')}</div>`;
     h += '<div class="journal"><div class="j-col"><h4>Worlds</h4>';
     for (const w of [...worlds].reverse()) {
       // saves from before the atlas have no colors
@@ -290,13 +289,13 @@ export class Menus {
     }
     h += '</div><div class="j-col"><h4>Landmarks</h4>';
     for (const w of [...wonders].reverse()) h += `<div class="j-row"><b>${w.name}</b><span>${w.kind === 'comet' ? 'Comet' : WONDERS[w.kind] ? WONDERS[w.kind].label : 'Landmark'} · ${w.planet}</span></div>`;
-    if (!wonders.length) h += '<div class="j-empty">Big landmarks stand out on the horizon. Walk or fly close to one to log it.</div>';
+    if (!wonders.length) h += '<div class="j-empty">Walk or fly close to a landmark to log it.</div>';
     h += '<h4>Species</h4>';
     for (const sp of [...species].reverse()) h += `<div class="j-row"><b>${sp.name}</b><span>${sp.label ? `${sp.label} · ` : ''}${sp.planet}</span></div>`;
     if (!species.length) h += '<div class="j-empty">Hold Right Mouse on a plant or creature to catalogue it.</div>';
-    h += '</div><div class="j-col"><h4>Echoes</h4>';
+    h += '</div><div class="j-col"><h4>Logs</h4>';
     for (const l of [...st.lore].reverse()) h += `<div class="j-lore"><div class="j-lore-title">${l.title}</div>${l.text.map((p) => `<p>${p}</p>`).join('')}</div>`;
-    if (!st.lore.length) h += '<div class="j-empty">Echo Stones, wrecks and spires record what you find here.</div>';
+    if (!st.lore.length) h += '<div class="j-empty">Messages from Echo Stones, ruins, wrecks and spires are saved here.</div>';
     h += '</div></div>';
     return h;
   }

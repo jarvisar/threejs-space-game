@@ -16,7 +16,7 @@ Visit [spacegame.ajarvis.co](https://spacegame.ajarvis.co) to play the latest de
 - Procedural flora, rocks and crystals placed per planet, plus grazing herds, bird flocks and floating drifters. Some lush, oceanic and exotic worlds also have a huge leviathan circling overhead.
 - Mining, a scanner, points of interest (Echo Stones, ruins, supply pods, beacons, resource deposits), crafting and eight upgrade tracks.
 - A new world shows a card with its size, day length, atmosphere, weather and life. Scanning from the ship shows the same card for whatever planet is under the reticle.
-- A journal that keeps every world, landmark, species and echo you've found, and how much of each world you've explored.
+- A journal that keeps every world, landmark, species and log you've found, and how much of each world you've explored.
 - Asteroid fields you can mine with the ship's lasers.
 - A galaxy map with warp jumps and route planning. Pick any star and it plots the jumps to get there with your current drive. Stars are gated by color, so better drives open up more of the galaxy.
 - Photo mode with time of day, zoom, depth of field, filters and PNG export.
@@ -116,7 +116,7 @@ For debugging, `?prof=1` keeps the worst time per section of the frame in `windo
 - Terrain is a height field, so there are no caves or overhangs.
 - Only mouse and keyboard are supported. There is no touch or gamepad input.
 - Mined plants and rocks are remembered, but only the most recent 5000.
-- There is one save slot. Starting a new journey replaces it, and the title screen asks first.
+- There is one save slot. Starting a new game replaces it, and the title screen asks first.
 - The save is stored per browser. Clearing site data deletes it.
 
 ## Project Structure
