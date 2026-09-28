@@ -40,7 +40,9 @@ void main() {
   // vAlong is 0 at the head, 1 at the far end. Bright near the head,
   // thinning out along the tail, soft at the edges.
   float a = vAlong;
-  float fall = pow(1.0 - a, 1.6) * smoothstep(0.0, 0.04, a);
+  // a lands a hair past 1 on the open end's rim, and pow of a negative is NaN
+  // on D3D, which drew the rims as dotted black rings
+  float fall = pow(max(1.0 - a, 0.0), 1.6) * smoothstep(0.0, 0.04, a);
   float body = pow(vFacing, 2.2);
   float streak = 1.0 - uStreak * 0.35 * (0.5 + 0.5 * sin(a * 60.0 - uTime * 0.4));
   gl_FragColor = vec4(uColor * fall * body * streak, 1.0);

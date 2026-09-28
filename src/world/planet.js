@@ -1,17 +1,11 @@
 import * as THREE from 'three';
 import { TerrainGenerator, faceDir } from '../gen/terrain.js';
-import { CHUNK_N, buildChunkIndex } from './chunkBuilder.js';
+import { CHUNK_N } from './chunkBuilder.js';
 import { createTerrainMaterial } from '../render/materials.js';
 import { Body } from './body.js';
 import { CloudPuffs } from './clouds.js';
 import { smoothstep } from '../core/math.js';
 import { RNG } from '../core/rng.js';
-
-let sharedIndex = null;
-function chunkIndex() {
-  if (!sharedIndex) sharedIndex = new THREE.BufferAttribute(buildChunkIndex(CHUNK_N), 1);
-  return sharedIndex;
-}
 
 const _v = new THREE.Vector3();
 const _t1 = new THREE.Vector3();
@@ -307,8 +301,6 @@ export class Planet extends Body {
     }
     if (node.mesh) {
       this.group.remove(node.mesh);
-      // the index buffer is shared, detach it so dispose() doesn't free it
-      node.mesh.geometry.setIndex(null);
       node.mesh.geometry.dispose();
       node.mesh = null;
       this.chunkCount--;
@@ -338,10 +330,11 @@ export class Planet extends Body {
 
   buildMesh(node, res) {
     const geo = new THREE.BufferGeometry();
-    geo.setIndex(chunkIndex());
+    // each chunk has its own triangulation, see buildChunkIndex
+    geo.setIndex(new THREE.BufferAttribute(res.index, 1));
     geo.setAttribute('position', new THREE.BufferAttribute(res.positions, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(res.normals, 3));
-    geo.setAttribute('aData', new THREE.BufferAttribute(res.data, 2));
+    geo.setAttribute('aData', new THREE.BufferAttribute(res.data, 3));
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), res.radius);
     const mesh = new THREE.Mesh(geo, this.material);
     mesh.position.set(res.center[0], res.center[1], res.center[2]);

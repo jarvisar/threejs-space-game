@@ -1,3 +1,5 @@
+import { RNG, hashCombine } from '../core/rng.js';
+
 // Planet archetypes. Ranges are [min, max] and get rolled per planet.
 // Palette colors are sRGB hex. sky is the relative Rayleigh scattering per
 // channel, which sets the daytime sky tint (sunsets end up complementary).
@@ -331,5 +333,128 @@ export function buildTerrain(rng, type, radius, seed) {
   t.oceanDepth = Math.min(t.oceanDepth, radius * 0.02);
   t.pillarAmp = Math.min(t.pillarAmp, radius * 0.02);
   if (radius < 3000) t.craterScale *= Math.max(0.5, radius / 3000);
+  return t;
+}
+
+// Landforms each planet type gets on top of the base terrain (see
+// TerrainGenerator). Rolled from their own RNG, after the ocean is decided, so
+// the rest of the planet (palette, atmosphere, flora, fauna) generates exactly
+// as it did before these existed.
+export function buildLandforms(t, typeId) {
+  const rng = new RNG(hashCombine(t.seed, 9001));
+  // big features shrink on small moons
+  const k = Math.min(1, t.radius / 5000);
+  t.erosion = rng.range(0.5, 1);
+
+  const rivers = (o) => {
+    t.riverScale = rng.range(o.scale[0], o.scale[1]) * k;
+    t.riverWidth = rng.range(o.width[0], o.width[1]);
+    t.riverBank = rng.range(o.bank[0], o.bank[1]);
+    t.riverSlope = rng.range(o.slope[0], o.slope[1]);
+    t.riverHi = o.hi ? rng.range(o.hi[0], o.hi[1]) : 0;
+    t.riverMoist = o.moist ? rng.range(o.moist[0], o.moist[1]) : 0;
+    if (o.canyon) t.canyonDepth = rng.range(o.canyon[0], o.canyon[1]);
+    else t.riverDepth = o.depth;
+    if (o.rel) t.canyonRel = 1;
+    t.riverGlow = o.glow ? 1 : 0;
+  };
+  const mesas = (o) => {
+    t.mesaScale = rng.range(o.scale[0], o.scale[1]) * k;
+    t.mesaAmp = rng.range(o.amp[0], o.amp[1]) * k;
+    t.mesaTiers = o.tiers;
+    t.mesaGap = rng.range(0.09, 0.15);
+    t.mesaLevel = rng.range(o.level[0], o.level[1]);
+    t.mesaEdge = rng.range(o.edge[0], o.edge[1]);
+    t.butteLevel = rng.chance(o.buttes) ? rng.range(0.4, 0.52) : 0;
+  };
+  const blisters = (o) => {
+    t.blisterScale = rng.range(o.scale[0], o.scale[1]);
+    t.blisterDensity = rng.range(o.density[0], o.density[1]);
+    t.blisterAmp = rng.range(0.3, 0.5);
+    t.poolRatio = o.pools;
+    t.poolDepth = rng.range(2.5, 4.5);
+  };
+
+  switch (typeId) {
+    case 'lush':
+      if (rng.chance(0.85)) rivers({ scale: [2800, 4600], width: [6, 12], bank: [25, 55], slope: [1.6, 2.6], hi: [90, 170], moist: [0.3, 0.45], depth: 3.5 });
+      if (rng.chance(0.45)) mesas({ scale: [700, 1200], amp: [22, 45], tiers: 1, level: [0.22, 0.35], edge: [8, 12], buttes: 0.3 });
+      break;
+    case 'ocean':
+      t.arcAmp = rng.range(12, 30);
+      t.arcScale = rng.range(1500, 2600) * k;
+      t.bankDepth = rng.range(2, 5);
+      if (rng.chance(0.85)) {
+        t.atollDensity = rng.range(0.25, 0.5);
+        t.atollScale = rng.range(900, 1500) * k;
+        t.atollH = rng.range(3, 6);
+        t.lagoonDepth = rng.range(2.5, 4);
+      }
+      t.beachWidth = rng.range(3, 4.5);
+      break;
+    case 'desert':
+      if (rng.chance(0.85)) mesas({ scale: [600, 1100], amp: [35, 75], tiers: rng.chance(0.6) ? 2 : 1, level: [0.12, 0.28], edge: [7, 11], buttes: 0.8 });
+      // open desert floor between the mesas instead of ranges everywhere
+      if (t.mesaAmp > 0) t.mountCoverage *= 0.7;
+      if (rng.chance(0.6)) rivers({ scale: [1800, 3000], width: [10, 22], bank: [30, 60], slope: [0.5, 0.9], canyon: [22, 45] });
+      // planet wide terraces fight the mesas, keep them faint
+      t.terraceMix = Math.min(t.terraceMix, 0.3);
+      break;
+    case 'frozen':
+      if (rng.chance(0.85)) {
+        t.iceLevel = rng.range(12, 32);
+        t.iceSoft = rng.range(6, 12);
+        t.iceScale = rng.range(900, 1600);
+        if (rng.chance(0.8)) {
+          t.crevScale = rng.range(80, 140);
+          t.crevWidth = rng.range(5, 8);
+          t.crevDepth = rng.range(4, 7);
+        }
+      }
+      if (rng.chance(0.5)) rivers({ scale: [2000, 3200], width: [18, 35], bank: [40, 80], slope: [1, 1.6], canyon: [14, 28] });
+      t.erosion = rng.range(0.8, 1.2);
+      break;
+    case 'volcanic':
+      if (rng.chance(0.9)) {
+        t.volcScale = rng.range(2400, 3400) * k;
+        t.volcDensity = rng.range(0.75, 1);
+        // fewer ranges so the cones stand out on open lava plains
+        t.mountCoverage *= 0.6;
+        t.volcAmp = rng.range(160, 280) * k;
+      }
+      if (rng.chance(0.8)) rivers({ scale: [2600, 4200], width: [4, 9], bank: [8, 20], slope: [0.3, 0.6], hi: [60, 120], moist: [0.5, 0.6], depth: 3, glow: !t.hasOcean });
+      break;
+    case 'toxic':
+      if (rng.chance(0.85)) blisters({ scale: [90, 160], density: [0.25, 0.5], pools: rng.range(0.3, 0.6) });
+      if (t.hasOcean && rng.chance(0.5)) rivers({ scale: [1400, 2400], width: [5, 10], bank: [15, 35], slope: [1, 1.8], hi: [50, 90], moist: [0.3, 0.5], depth: 3 });
+      if (rng.chance(0.3)) mesas({ scale: [600, 1000], amp: [20, 40], tiers: 1, level: [0.2, 0.3], edge: [7, 10], buttes: 0.5 });
+      break;
+    case 'radioactive':
+      if (rng.chance(0.8)) rivers({ scale: [700, 1300], width: [1.5, 3], bank: [3, 6], slope: [0, 0.05], canyon: [4, 8], rel: true, glow: true });
+      t.craterGlass = 1;
+      if (rng.chance(0.4)) mesas({ scale: [600, 1100], amp: [25, 50], tiers: 1, level: [0.2, 0.32], edge: [7, 10], buttes: 0.6 });
+      break;
+    case 'barren':
+      if (rng.chance(0.6)) rivers({ scale: [1800, 3000], width: [12, 25], bank: [30, 60], slope: [0.5, 0.9], canyon: [25, 50] });
+      if (rng.chance(0.35)) mesas({ scale: [600, 1100], amp: [25, 50], tiers: rng.chance(0.5) ? 2 : 1, level: [0.15, 0.3], edge: [7, 10], buttes: 0.6 });
+      t.craterEjecta = rng.range(0.5, 0.9);
+      break;
+    case 'dead':
+      if (rng.chance(0.7)) t.mariaLevel = rng.range(-0.05, 0.1);
+      t.craterEjecta = rng.range(0.6, 1);
+      t.erosion = rng.range(0.2, 0.5);
+      break;
+    case 'exotic':
+      if (rng.chance(0.6)) {
+        t.colScale = rng.range(8, 14);
+        t.colAmp = rng.range(4, 10);
+        t.colBevel = rng.range(0.8, 1.6);
+        t.colRegion = rng.range(500, 900);
+        t.colLevel = rng.range(-0.1, 0.25);
+      }
+      if (rng.chance(0.5)) mesas({ scale: [700, 1200], amp: [40, 80], tiers: 3, level: [0.18, 0.3], edge: [8, 12], buttes: 0.7 });
+      if (rng.chance(0.5)) blisters({ scale: [80, 180], density: [0.2, 0.45], pools: 0.25 });
+      break;
+  }
   return t;
 }

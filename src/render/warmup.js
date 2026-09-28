@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { floraMaterial } from '../world/scatter.js';
-import { faunaMaterial } from '../world/fauna.js';
+import { faunaMaterial, faunaDepthMaterial } from '../world/fauna.js';
 import { std, makeBeam } from '../world/pois.js';
 import { patchStandard } from './materials.js';
 import { LAYER_POST } from './pipeline.js';
@@ -31,9 +31,12 @@ export function buildWarmup() {
   const faunaGeo = box.clone();
   faunaGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
   faunaGeo.setAttribute('aPart', new THREE.BufferAttribute(new Float32Array(n), 1));
-  faunaGeo.setAttribute('aExtra', new THREE.BufferAttribute(new Float32Array(n), 1));
-  faunaGeo.setAttribute('aAnim', new THREE.InstancedBufferAttribute(new Float32Array(2), 2));
+  faunaGeo.setAttribute('aPivot', new THREE.BufferAttribute(new Float32Array(n * 4), 4));
+  faunaGeo.setAttribute('aPivot2', new THREE.BufferAttribute(new Float32Array(n * 4), 4));
+  faunaGeo.setAttribute('aRig', new THREE.BufferAttribute(new Float32Array(n * 4), 4));
+  faunaGeo.setAttribute('aAnim', new THREE.InstancedBufferAttribute(new Float32Array(4), 4));
   const fauna = new THREE.InstancedMesh(faunaGeo, faunaMaterial(), 1);
+  fauna.customDepthMaterial = faunaDepthMaterial();
   fauna.castShadow = true;
   g.add(fauna);
 

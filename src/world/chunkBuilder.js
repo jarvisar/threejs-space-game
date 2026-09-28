@@ -13,7 +13,11 @@ export function perimeterIndices(N) {
   return p;
 }
 
-export function buildChunkIndex(N) {
+// h holds the N x N grid heights. Each quad is split along the diagonal with
+// the smaller height difference, so triangles follow contours, ridges and
+// cliff edges instead of sawing across them. Near ties alternate the diagonal
+// so flat slopes don't all shade in one direction.
+export function buildChunkIndex(N, h) {
   const per = perimeterIndices(N);
   const P = per.length;
   const tris = (N - 1) * (N - 1) * 2 + P * 2;
@@ -25,10 +29,11 @@ export function buildChunkIndex(N) {
       const b = a + 1;
       const c = a + N;
       const d = c + 1;
-      // alternate the diagonal so slopes don't all shade in one direction.
+      const ad = Math.abs(h[a] - h[d]), bc = Math.abs(h[b] - h[c]);
+      const alongAD = ad + 0.02 < bc ? true : bc + 0.02 < ad ? false : ((i + j) & 1) === 1;
       // The terrain shader takes per face color from the first vertex, so the
       // two halves of a quad have to start on different corners.
-      if ((i + j) & 1) {
+      if (alongAD) {
         idx[k++] = a; idx[k++] = b; idx[k++] = d;
         idx[k++] = c; idx[k++] = a; idx[k++] = d;
       } else {
@@ -63,8 +68,9 @@ export function buildChunk(gen, R, face, level, x, y, N) {
   const gp = new Float64Array(G * G * 3);
   const gh = new Float32Array(G * G);
   const gm = new Float32Array(G * G);
+  const gf = new Float32Array(G * G);
   const d = [0, 0, 0];
-  const out = { h: 0, m: 0 };
+  const out = { h: 0, m: 0, f: 0 };
 
   for (let j = 0; j < G; j++) {
     const v = v0 + (j - 1) * step;
@@ -79,6 +85,7 @@ export function buildChunk(gen, R, face, level, x, y, N) {
       gp[o + 2] = d[2] * r;
       gh[j * G + i] = out.h;
       gm[j * G + i] = out.m;
+      gf[j * G + i] = out.f;
     }
   }
 
@@ -86,7 +93,9 @@ export function buildChunk(gen, R, face, level, x, y, N) {
   const V = N * N + per.length;
   const positions = new Float32Array(V * 3);
   const normals = new Float32Array(V * 3);
-  const data = new Float32Array(V * 2);
+  // height, moisture, feature mask (see TerrainGenerator.sample)
+  const data = new Float32Array(V * 3);
+  const heights = new Float32Array(N * N);
 
   const mid = ((N >> 1) + 1) * G + (N >> 1) + 1;
   const cx = gp[mid * 3], cy = gp[mid * 3 + 1], cz = gp[mid * 3 + 2];
@@ -115,8 +124,10 @@ export function buildChunk(gen, R, face, level, x, y, N) {
       normals[o + 2] = nz / nl;
 
       const h = gh[g];
-      data[(j * N + i) * 2] = h;
-      data[(j * N + i) * 2 + 1] = gm[g];
+      heights[j * N + i] = h;
+      data[(j * N + i) * 3] = h;
+      data[(j * N + i) * 3 + 1] = gm[g];
+      data[(j * N + i) * 3 + 2] = gf[g];
       if (h < minH) minH = h;
       if (h > maxH) maxH = h;
     }
@@ -138,14 +149,16 @@ export function buildChunk(gen, R, face, level, x, y, N) {
     normals[o] = normals[so];
     normals[o + 1] = normals[so + 1];
     normals[o + 2] = normals[so + 2];
-    data[(base + s) * 2] = data[src * 2];
-    data[(base + s) * 2 + 1] = data[src * 2 + 1];
+    data[(base + s) * 3] = data[src * 3];
+    data[(base + s) * 3 + 1] = data[src * 3 + 1];
+    data[(base + s) * 3 + 2] = data[src * 3 + 2];
   }
 
   return {
     positions,
     normals,
     data,
+    index: buildChunkIndex(N, heights),
     center: [cx, cy, cz],
     radius: Math.sqrt(rad2) + skirt,
     minH,

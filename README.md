@@ -17,6 +17,7 @@ Visit [spacegame.ajarvis.co](https://spacegame.ajarvis.co) to play the latest de
 - Mining, a scanner, points of interest (Echo Stones, ruins, supply pods, beacons, resource deposits), crafting and eight upgrade tracks.
 - A new world shows a card with its size, day length, atmosphere, weather and life. Scanning from the ship shows the same card for whatever planet is under the reticle.
 - A journal that keeps every world, landmark, species and log you've found, and how much of each world you've explored.
+- Arcade flight with optional orbits. Settle into orbit above a planet, burn to reshape it, and drop back in through atmospheric entry.
 - Asteroid fields you can mine with the ship's lasers.
 - A galaxy map with warp jumps and route planning. Pick any star and it plots the jumps to get there with your current drive. Stars are gated by color, so better drives open up more of the galaxy.
 - Photo mode with time of day, zoom, depth of field, filters and PNG export.
@@ -42,10 +43,12 @@ On foot:
 
 In the ship:
 
-- Steer with the mouse. The ship turns toward the reticle.
-- Use `W`/`S` for throttle and `A`/`D` to roll. Hold `Shift` to boost.
-- Press `Space` away from planets to engage the pulse drive. It slows down on its own as you approach a planet.
-- Press `E` near the ground to land, and `E` again to get out.
+- Steer with the mouse. The ship turns toward the reticle. Hold `Right Mouse` to look around without changing course.
+- Use `W`/`S` for throttle and `A`/`D` to roll. Double tap `A` or `D` for a barrel roll. Hold `Shift` to boost.
+- Flying low, the ship pulls up over hills on its own, so you can skim the ground without flying into it.
+- Press `Space` away from planets to engage the pulse drive. Aim near a planet and it locks on, steers toward it and drops out when you arrive.
+- Press `C` above the atmosphere to orbit the planet. See [Orbits](#orbits).
+- Press `E` near the ground to land. The ship picks a flat spot a little ahead of you and marks it. Press `E` again to get out.
 - Hold `Left Mouse` to fire the mining lasers at asteroids.
 - Press `F` to scan the planet below. Out in space it scans the planet under the reticle instead.
 
@@ -54,6 +57,21 @@ Anywhere:
 - `Tab` opens cargo, crafting, upgrades and the journal. `J` goes straight to the journal.
 - `G` opens the galaxy map. Drag to rotate and scroll to zoom. Hover a star to see its name and distance, and click it to plot a jump. If it's out of range the map plots a route and the warp button takes you to the next stop. Press `C` to center on your star and `T` to find the signal.
 - `P` toggles photo mode, which hides the HUD and freezes the world. Fly the camera with `WASD`, `R`/`F` to go up and down, `Q`/`E` to roll and the wheel to change speed. Hold `Z`/`X` to move the time of day, `1`/`2` to zoom, `B` for focus blur, `V` to cycle filters and `H` to hide the ship. `Enter` saves a PNG.
+
+## Orbits
+
+Normal flight ignores gravity so the ship always goes where it points. Orbiting is a separate mode. Press `C` anywhere between the top of the atmosphere and about twice the planet's radius and the ship settles into a circular orbit. The mouse then moves the camera around instead of steering.
+
+- `W`/`S` burn forward and backward along the orbit. Burning forward raises the far side of the orbit and burning backward lowers it. The orbit line and the Ap/Pe markers (highest and lowest point) update as you burn.
+- `A`/`D` tilt the orbit.
+- Hold `Shift` to fast forward. A lap around a normal sized planet takes about four minutes otherwise.
+- Scroll out to see the whole orbit around the planet.
+- `Space` leaves orbit and pulses toward wherever the camera is looking.
+- `C` leaves orbit and gives you back normal flight.
+
+To get back down, burn backward until the HUD shows an entry countdown. When the orbit dips into the air the ship noses down and goes through atmospheric entry, then you're flying normally again.
+
+###### Note: surface gravity is the same on every planet, so orbits around small moons are slower than around big planets.
 
 ## Progression
 

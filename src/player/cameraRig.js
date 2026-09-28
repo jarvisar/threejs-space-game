@@ -1,8 +1,13 @@
 import * as THREE from 'three';
 import { Planet } from '../world/planet.js';
+import { smoothstep } from '../core/math.js';
 
 const _v = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _q2 = new THREE.Quaternion();
+const _q3 = new THREE.Quaternion();
+const _m = new THREE.Matrix4();
 const Y = new THREE.Vector3(0, 1, 0);
 const X = new THREE.Vector3(1, 0, 0);
 
@@ -20,6 +25,9 @@ export class CameraRig {
     this.orbitYaw = 0;
     this.orbitPitch = -0.25;
     this.orbitDist = 18;
+    this.lookYaw = 0;
+    this.orbitZoom = 1;
+    this.lookPitch = 0;
     this.fov = 70;
     this.shakeAmt = 0;
     this.transition = null;
@@ -36,18 +44,35 @@ export class CameraRig {
 
   followShip(ship, dt, input) {
     this.frame = ship.frame;
-    if (ship.state === 'flying' || ship.state === 'takeoff') {
+    if (ship.orbit) {
+      this.followOrbit(ship, dt, input);
+    } else if (ship.state === 'flying' || ship.state === 'takeoff') {
+      // right mouse swings the camera around the ship, it eases back on release
+      if (ship.freeLook && input && input.enabled) {
+        const look = input.look();
+        this.lookYaw -= look.x;
+        this.lookPitch = Math.max(-1.2, Math.min(1.0, this.lookPitch - look.y));
+      } else {
+        const k = Math.exp(-dt * 4);
+        this.lookYaw *= k;
+        this.lookPitch *= k;
+      }
+      const view = _q2.copy(ship.aim);
+      if (Math.abs(this.lookYaw) + Math.abs(this.lookPitch) > 1e-4) {
+        view.multiply(_q.setFromAxisAngle(Y, this.lookYaw)).multiply(_q.setFromAxisAngle(X, this.lookPitch));
+      }
       const speedK = Math.min(1, ship.speed / 400);
-      const target = _v.set(0, 3.6 + speedK * 0.6, 15 + speedK * 3.5).multiplyScalar(this.zoom).applyQuaternion(ship.aim);
+      // boost drops the camera back a little, like it can't keep up
+      const target = _v.set(0, 3.6 + speedK * 0.6, 15 + speedK * 3.5 + ship.boost * 2.5).multiplyScalar(this.zoom).applyQuaternion(view);
       this.smoothOffset.lerp(target, 1 - Math.exp(-dt * 10));
       this.localPos.copy(ship.pos).add(this.smoothOffset);
       // look slightly above the ship so it sits low in frame
-      _q.copy(ship.aim).multiply(new THREE.Quaternion().setFromAxisAngle(X, -0.06));
+      _q.copy(view).multiply(_q3.setFromAxisAngle(X, -0.06));
       this.localQuat.slerp(_q, 1 - Math.exp(-dt * 14));
       this.orbitYaw = 0;
       this.orbitPitch = -0.28;
       const pulseK = ship.pulse ? ship.pulseSpool : 0;
-      this.fov = 68 + ship.boost * 9 + pulseK * 22;
+      this.fov = 68 + ship.boost * 9 + pulseK * 22 + ship.heat * 6;
     } else {
       // landed or landing: free orbit around the ship
       if (input && input.enabled) {
@@ -69,6 +94,29 @@ export class CameraRig {
     }
     this.keepAboveGround(1.2);
     this.finish(dt);
+  }
+
+  // Slow cinematic view while orbiting. The mouse swings it around the ship,
+  // and it's based on the orbit's own axes so a retrograde flip doesn't spin it.
+  followOrbit(ship, dt, input) {
+    if (input && input.enabled) {
+      const look = input.look();
+      this.orbitYaw -= look.x;
+      this.orbitPitch = Math.max(-1.3, Math.min(1.1, this.orbitPitch - look.y));
+    }
+    const up = _v2.copy(ship.pos).normalize();
+    const q = _q2.copy(ship.orbit.view).multiply(_q.setFromAxisAngle(Y, this.orbitYaw)).multiply(_q3.setFromAxisAngle(X, this.orbitPitch));
+    const off = _v.set(0, 0, 30 * this.orbitZoom).applyQuaternion(q).addScaledVector(up, 2);
+    // offset relative to the ship, the ship itself moves a few hundred m/s
+    this.smoothOffset.lerp(off, 1 - Math.exp(-dt * 3));
+    this.localPos.copy(ship.pos).add(this.smoothOffset);
+    // zoomed far out the view swings over to the planet so the whole orbit fits
+    const k = smoothstep(500, 8000, this.smoothOffset.length());
+    const look = _v.copy(ship.pos).addScaledVector(up, 1.5).multiplyScalar(1 - k);
+    const m = _m.lookAt(this.localPos, look, up);
+    _q.setFromRotationMatrix(m);
+    this.localQuat.slerp(_q, 1 - Math.exp(-dt * 8));
+    this.fov = 60;
   }
 
   followWalker(walker, dt) {

@@ -126,6 +126,7 @@ function makeSpecies(def, kind, i, n, forceRes) {
     sp.moistMin = 0;
   }
   if (kind === 'crystal' && res !== 'hydrogel') sp.density *= 0.6;
+  sp.planetType = def.type;
   return sp;
 }
 

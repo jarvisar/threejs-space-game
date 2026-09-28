@@ -9,7 +9,7 @@ import { buildWarmup, prepareView, afterFrames } from '../render/warmup.js';
 import { loader } from '../ui/loader.js';
 import { Galaxy, STAR_CLASSES, CORE_INDEX } from '../gen/galaxy.js';
 import { generateSystem, generateCoreSystem } from '../gen/system.js';
-import { StarSystem } from '../world/starSystem.js';
+import { StarSystem, soiRadius } from '../world/starSystem.js';
 import { Planet, findLand, surfaceNormal } from '../world/planet.js';
 import { Sky } from '../world/sky.js';
 import { Weather } from '../world/weather.js';
@@ -23,6 +23,8 @@ import { faunaSpecies } from '../world/fauna.js';
 import { planetSpecies } from '../gen/flora.js';
 import { Input } from '../core/input.js';
 import { Ship } from '../player/ship.js';
+import { OrbitLine, orbitFloor, timeToRadius } from '../player/orbit.js';
+import { EntryFx } from '../render/entryFx.js';
 import { Walker } from '../player/walker.js';
 import { CameraRig } from '../player/cameraRig.js';
 import { Multitool } from '../player/multitool.js';
@@ -136,6 +138,8 @@ export class Game {
     this.tunnel = new WarpTunnel(this.camera);
     this.weather = new Weather();
     this.dust = new SpaceDust(this.scene);
+    this.entryFx = new EntryFx(this.scene);
+    this.orbitLine = new OrbitLine(this.scene);
     this.meteors = new Meteors(this.scene);
     this.fields = [];
     this.ship = null;
@@ -444,7 +448,7 @@ export class Game {
     this.ship.vel.set(0, 0, -600).applyQuaternion(this.ship.quat);
     this.ship.state = 'flying';
     this.ship.throttle = 0.4;
-    this.ship.pulse = false;
+    this.ship.resetMotion();
     this.setMode('ship');
   }
 
@@ -466,11 +470,17 @@ export class Game {
     this.ship.state = p.shipState === 'landed' && body ? 'landed' : 'flying';
     this.ship.gear = this.ship.state === 'landed' ? 1 : 0;
     this.ship.throttle = 0;
-    this.ship.pulse = false;
+    this.ship.resetMotion();
+    // terrain changes between versions can put a saved spot in a new river or sea
+    const wet = (dir) => body.seaLevel !== null && body.heightAt(dir) < 1;
     if (this.ship.state === 'landed') {
       // re-seat on the ground in case the terrain moved since the save
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.ship.quat);
-      this.ship.placeLanded(body, this.ship.pos.clone().normalize(), fwd);
+      let dir = this.ship.pos.clone().normalize();
+      if (wet(dir)) dir = findLand(body, dir, 2);
+      this.ship.placeLanded(body, dir, fwd);
+    } else if (p.orbit && this.ship.canOrbit() === null) {
+      this.ship.enterOrbit(true);
     }
     if (p.mode === 'foot' && body) {
       this.walker.frame = body;
@@ -478,7 +488,14 @@ export class Game {
       this.walker.heading.fromArray(p.walkerHeading);
       this.walker.vel.set(0, 0, 0);
       // make sure we are not under the ground after terrain tweaks
-      const dir = this.walker.pos.clone().normalize();
+      let dir = this.walker.pos.clone().normalize();
+      if (wet(dir)) {
+        // stand next to the ship rather than wherever the land search ends up
+        const side = new THREE.Vector3(1, 0, 0).applyQuaternion(this.ship.quat);
+        dir = this.ship.pos.clone().addScaledVector(side, 6).normalize();
+        if (wet(dir)) dir = findLand(body, dir, 2);
+        this.walker.pos.copy(dir).multiplyScalar(this.walker.floorAt(dir));
+      }
       this.walker.pos.copy(dir).multiplyScalar(Math.max(this.walker.pos.length(), this.walker.floorAt(dir)));
       this.setMode('foot');
     } else {
@@ -495,6 +512,7 @@ export class Game {
       shipPos: s.pos.toArray(),
       shipQuat: s.quat.toArray(),
       shipState: s.state === 'landed' ? 'landed' : 'flying',
+      orbit: !!s.orbit,
       walkerPos: this.walker.pos.toArray(),
       walkerHeading: this.walker.heading.toArray(),
     };
@@ -825,6 +843,7 @@ export class Game {
     this.system.updateRender(camWorld);
     for (const f of this.fields) f.update(this.time, camWorld, camWorld);
     this.ship.updateModel(camWorld);
+    this.updateFlightFx(dt, camWorld);
     this.effects.update(dt);
     const inSpace = this.screen === 'play' && this.mode === 'ship' && !this.photo;
     const dustAmt = inSpace && !this.warp ? 1 - (this.ship.inAtmo || 0) : 0;
@@ -1133,6 +1152,8 @@ export class Game {
       wind = 0.05 + (this.stormK || 0) * 0.3;
       if (inShip && s.inAtmo > 0) wind += Math.min(0.25, s.speed / 1200) * s.inAtmo;
     }
+    // entry roars even before the surface is streamed in
+    if (inShip) wind = Math.max(wind, s.heat * 0.6);
     if (this.mode === 'foot' && this.walker.grounded && this.walker.moving > 0.5 && !this.paused) {
       const ph = Math.floor(this.walker.bobPhase / Math.PI);
       if (ph !== this.stepPhase) {
@@ -1156,14 +1177,80 @@ export class Game {
 
   // ---------------------------------------------------------------- ship
 
-  clearanceFor(worldPos) {
+  // entry plasma and the orbit line, after the camera has settled for the frame
+  updateFlightFx(dt, camWorld) {
+    const ship = this.ship;
+    const pos = _v.subVectors(ship.worldPos(_v2), camWorld);
+    const vel = ship.worldVel(new THREE.Vector3());
+    const speed = vel.length();
+    const dir = speed > 1 ? vel.divideScalar(speed) : new THREE.Vector3(0, 0, -1).applyQuaternion(ship.worldQuat(_q));
+    const heat = this.screen === 'play' && this.mode === 'ship' && !this.warp ? ship.heat : 0;
+    this.entryFx.update(pos, dir, heat, this.time);
+    // the path hides in photo mode with the rest of the HUD
+    if (ship.orbit) {
+      this.orbitBody = ship.frame;
+      this.orbitEl = ship.orbit.el;
+    }
+    const show = !!ship.orbit && this.screen === 'play' && this.mode === 'ship' && !this.photo;
+    this.orbitLine.update(dt, this.orbitBody, this.orbitEl, show, camWorld);
+    const u = this.pipeline.finalUniforms;
+    if (!this.warp) u.uAberration.value = heat * 0.35;
+  }
+
+  // distance to the nearest atmosphere (or the star's glow), and the world
+  // position of that body's center in `near`
+  clearanceFor(worldPos, near) {
     let best = Infinity;
     for (const b of this.system.bodies) {
       const d = _v.subVectors(worldPos, b.position).length() - b.atmoRadius;
-      if (d < best) best = d;
+      if (d < best) {
+        best = d;
+        if (near) near.copy(b.position);
+      }
     }
     const ds = worldPos.length() - this.system.star.radius * 3;
+    if (ds < best && near) near.set(0, 0, 0);
     return Math.min(best, ds);
+  }
+
+  toggleOrbit() {
+    const ship = this.ship;
+    if (ship.orbit) return ship.leaveOrbit('manual');
+    if (ship.pulse) ship.dropPulse('manual');
+    const why = ship.canOrbit();
+    if (why === null) return ship.enterOrbit();
+    const f = ship.frame;
+    if (why === 'space' || why === 'far') this.hud.message('Get closer to a planet to orbit it', 1800);
+    else if (why === 'low') this.hud.message(f.def.atmosphere ? 'Climb above the atmosphere to orbit' : 'Climb higher to orbit', 1800);
+  }
+
+  // body the pulse drive is homing in on: whatever is close to the aim, and it
+  // stays locked until the aim wanders well off it
+  updatePulseLock(ship) {
+    if (!ship.pulse) {
+      this.pulseLock = null;
+      return null;
+    }
+    const wp = ship.worldPos(_v2);
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(ship.frame ? _q.multiplyQuaternions(ship.frame.quat, ship.aim) : ship.aim);
+    let best = null;
+    let bestA = 0.13;
+    for (const b of this.system.bodies) {
+      const to = _v.subVectors(b.position, wp);
+      const d = to.length();
+      if (d < b.atmoRadius * 1.2 && b !== this.pulseLock) continue;
+      const a = Math.acos(Math.min(1, to.dot(fwd) / d)) - Math.asin(Math.min(1, b.radius / d)) * 0.5;
+      const limit = b === this.pulseLock ? 0.35 : bestA;
+      if (a < limit && (!best || a < bestA)) {
+        bestA = a;
+        best = b;
+      }
+    }
+    this.pulseLock = best;
+    if (!best) return null;
+    // direction to the center, in the ship's frame
+    const dir = ship.frame ? ship.frame.toLocal(best.position, new THREE.Vector3()).sub(ship.pos) : best.position.clone().sub(ship.pos);
+    return dir.normalize();
   }
 
   updateShipMode(dt) {
@@ -1171,7 +1258,12 @@ export class Game {
     const input = this.input;
     this.visor = false;
     const wp = ship.worldPos(_v2);
-    const clearance = this.clearanceFor(wp);
+    const near = new THREE.Vector3();
+    const clearance = this.clearanceFor(wp, near);
+    // toward the nearest body, in the ship's frame
+    const nearDir = near.sub(wp).normalize();
+    if (ship.frame) nearDir.applyQuaternion(ship.frame.invQuat);
+    const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.rig.localQuat);
     const repaired = this.state.story.stage !== 'repair';
 
     if (ship.state === 'landed') {
@@ -1189,16 +1281,27 @@ export class Game {
       if (input.hit('KeyE')) {
         const why = ship.canLand();
         if (why === null) {
-          const fail = ship.startLanding();
-          if (fail === 'water') this.hud.message('Cannot land on liquid');
-          else if (fail === 'steep') this.hud.message('Surface too steep');
+          const site = ship.findLandingSite();
+          if (site) ship.startLanding(site);
+          else this.hud.message('No flat ground here');
         } else if (why === 'fast') this.hud.message('Slow down to land');
         else if (why === 'high') this.hud.message('Get closer to the ground to land');
+        else if (why === 'orbit') this.hud.message('Press C to leave orbit first');
       }
+      if (input.hit('KeyC')) this.toggleOrbit();
       if (input.hit('KeyF')) this.shipScan();
+      // Landing spot preview. Checks straight ahead most of the time and does the
+      // full search now and then. False means it looked and found nothing.
+      if (ship.canLand() !== null) this.landSite = null;
+      else if (this.frame % 10 === 0) {
+        const quick = ship.findLandingSite(true);
+        if (quick) this.landSite = quick;
+        else if (this.frame % 30 === 0 || this.landSite == null) this.landSite = ship.findLandingSite() || false;
+      }
     }
 
-    ship.update(dt, input, { clearance, time: this.time });
+    const lockDir = this.updatePulseLock(ship);
+    ship.update(dt, input, { clearance, nearDir, lockDir, camDir, time: this.time });
 
     if (ship.state === 'flying') {
       const body = this.system.frameBodyFor(ship.worldPos(_v), ship.frame);
@@ -1226,7 +1329,12 @@ export class Game {
       }
     }
 
-    if (input.wheel) this.rig.zoom = Math.max(0.6, Math.min(2.2, this.rig.zoom * (input.wheel > 0 ? 1.1 : 0.9)));
+    if (input.wheel && ship.orbit) {
+      // in orbit the wheel goes from the ship out to a view of the whole orbit
+      const max = (soiRadius(ship.frame) * 1.6) / 30;
+      this.rig.orbitZoom = Math.max(1, Math.min(max, this.rig.orbitZoom * (input.wheel > 0 ? 1.5 : 1 / 1.5)));
+    } else if (input.wheel) this.rig.zoom = Math.max(0.6, Math.min(2.2, this.rig.zoom * (input.wheel > 0 ? 1.1 : 0.9)));
+    if (ship.heat > 0.02) this.rig.shake(ship.heat * dt * 2.5);
     this.rig.followShip(ship, dt, input);
     this.updateShipLaser(dt);
 
@@ -1247,7 +1355,7 @@ export class Game {
     this.shipTarget = null;
     this.beamOn = false;
     let target = null;
-    const firing = ship.state === 'flying' && !ship.pulse && this.input.mouse(0);
+    const firing = ship.state === 'flying' && !ship.pulse && !ship.orbit && this.input.mouse(0);
     const origin = this.rig.worldPos.clone();
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.rig.worldQuat);
     const range = 1200;
@@ -1294,12 +1402,41 @@ export class Game {
         this.audio.whoosh(1.5, 0.3);
         break;
       case 'pulseEnd':
-        if (e.reason === 'proximity') this.hud.message('Pulse drive disengaged', 1500);
+        if (e.reason === 'proximity') {
+          const f = this.ship.frame;
+          this.hud.message(f && f === this.pulseLock ? `Arrived at ${f.def.name}` : 'Pulse drive disengaged', 1800);
+        }
         this.audio.whoosh(0.8, 0.15);
         break;
       case 'pulseBlocked':
-        this.hud.message('Pulse drive needs open space', 1800);
+        if (e.reason === 'atmo') this.hud.message('Leave the atmosphere to use the pulse drive', 1800);
+        else if (e.reason === 'reverse') this.hud.message('Throttle up to use the pulse drive', 1800);
+        else this.hud.message('Too close to a planet. Aim away from it', 1800);
         this.audio.error();
+        break;
+      case 'orbitStart': {
+        if (e.instant) break;
+        this.rig.orbitYaw = 0.35;
+        this.rig.orbitPitch = -0.25;
+        this.rig.orbitZoom = 1;
+        this.hud.message(`Orbiting ${this.ship.frame.def.name}`, 2000);
+        this.audio.whoosh(1.2, 0.14);
+        break;
+      }
+      case 'orbitEnd':
+        if (e.reason === 'entry') this.hud.message(this.ship.frame && this.ship.frame.def.atmosphere ? 'Atmospheric entry' : 'Leaving orbit', 1800);
+        else if (e.reason === 'escape') this.hud.message('Escaped orbit', 1800);
+        this.audio.whoosh(0.7, 0.12);
+        break;
+      case 'entry':
+        this.rig.shake(0.35);
+        this.audio.whoosh(3.0, 0.3);
+        break;
+      case 'roll':
+        this.audio.whoosh(0.45, 0.12);
+        break;
+      case 'boost':
+        this.rig.shake(0.12);
         break;
       case 'impact':
         this.rig.shake(Math.min(1.2, e.speed / 40));
@@ -1751,7 +1888,7 @@ export class Game {
     const c = new THREE.Color(cls.color);
     this.tunnel.setColors(core ? new THREE.Color(0.5, 0.3, 0.05) : new THREE.Color(0.05, 0.12, 0.35), c.clone().multiplyScalar(1.4));
     this.warp = { t: 0, target, core, loaded: false, dur: core ? 8 : 6 };
-    this.ship.pulse = false;
+    this.ship.resetMotion();
     this.audio.warpCharge();
     this.hud.setVisible(false);
     this.saveSoon = false;
@@ -1876,24 +2013,47 @@ export class Game {
 
     if (this.mode === 'ship') {
       const s = this.ship;
+      const o = s.orbit;
       let mode = 'Impulse';
-      if (s.pulse) mode = 'Pulse drive';
+      let sub = '';
+      if (o) {
+        mode = o.settle < 1 ? 'Entering orbit' : o.warp > 1.5 ? 'Orbit · Fast forward' : 'Orbit';
+        sub = this.orbitSub(s);
+      } else if (s.pulse) {
+        mode = 'Pulse drive';
+        const t = this.pulseLock;
+        if (t) sub = `${t.def.name} · ${this.pulseEta(s, t)}`;
+      } else if (s.queuedPulse) mode = 'Pulse drive';
       else if (s.state === 'landed') mode = 'Landed';
       else if (s.state === 'landing') mode = 'Landing';
       else if (s.state === 'takeoff') mode = 'Launching';
+      else if (s.heat > 0.25) mode = 'Atmospheric entry';
       else if (s.inAtmo > 0.5) mode = 'Atmospheric flight';
       else if (s.boost > 0.2) mode = 'Boost';
-      hud.updateFlight({ mode, speed: s.speed, alt: s.frame ? s.altitude : Infinity, throttle: s.throttle, energy: s.energy, pulse: s.pulse });
+      hud.updateFlight({ mode, sub, speed: o ? o.v.length() : s.speed, alt: s.frame ? s.altitude : Infinity, throttle: s.throttle, energy: s.energy, pulse: s.pulse, orbit: !!o });
+      hud.setHeat(s.heat);
       let prompt = null;
+      const flying = s.state === 'flying';
       // no take off prompt while the thrusters are still broken
       if (s.state === 'landed') prompt = this.state.story.stage === 'repair' ? '<kbd>E</kbd>Exit ship' : '<kbd>E</kbd>Exit ship &nbsp; <kbd>W</kbd>Take off';
-      else if (s.state === 'flying' && s.canLand() === null) prompt = '<kbd>E</kbd>Land';
+      else if (flying && s.canLand() === null) prompt = this.landSite === false ? '<span class="dim">No flat ground here</span>' : '<kbd>E</kbd>Land';
+      else if (flying && !s.pulse && s.canOrbit() === null) prompt = '<kbd>C</kbd>Orbit';
       hud.prompt(prompt);
-      if (s.state === 'flying') {
+      if (flying) {
+        const wp = s.worldPos(new THREE.Vector3());
         const wq = s.worldQuat(new THREE.Quaternion());
-        const nose = this.project(s.worldPos(new THREE.Vector3()).addScaledVector(new THREE.Vector3(0, 0, -1).applyQuaternion(wq), 3000), {});
-        hud.setNose(nose.x - this.viewW / 2, nose.y - this.viewH / 2, !nose.edge);
-      } else hud.setNose(0, 0, false);
+        const nose = this.project(wp.clone().addScaledVector(new THREE.Vector3(0, 0, -1).applyQuaternion(wq), 3000), {});
+        hud.setNose(nose.x - this.viewW / 2, nose.y - this.viewH / 2, !nose.edge && !o);
+        // where the ship is actually going, when that's not where it points
+        const v = s.worldVel(new THREE.Vector3());
+        const vs = v.length();
+        const fpm = this.project(wp.addScaledVector(v, 3000 / Math.max(vs, 1)), {});
+        const off = Math.hypot(fpm.x - nose.x, fpm.y - nose.y);
+        hud.setVelocity(fpm.x - this.viewW / 2, fpm.y - this.viewH / 2, vs > 20 && !fpm.edge && !s.pulse && (off > 14 || !!o));
+      } else {
+        hud.setNose(0, 0, false);
+        hud.setVelocity(0, 0, false);
+      }
       hud.setTarget(this.shipTarget);
     } else {
       let prompt = null;
@@ -1934,6 +2094,32 @@ export class Game {
         const seen = this.state.wonders && this.state.wonders.some((w) => w.kind === 'comet' && w.name === comet.name && w.system === sys.name);
         if (p.dist > comet.radius * 6 && p.dist < 400000) markers.push({ id: 'comet', x: p.x, y: p.y, visible: !p.edge || p.dist < 120000, edge: p.edge, label: seen ? comet.name : 'Comet', sub: fmtDist(p.dist), kind: 'poi', color: '#bfe6ff' });
       }
+      const s = this.ship;
+      if (s.orbit && s.frame) {
+        const el = s.orbit.el;
+        const f = s.frame;
+        const sp = this.project(s.worldPos(new THREE.Vector3()), tmp);
+        if (sp.dist > 400) markers.push({ id: 'ship', x: sp.x, y: sp.y, visible: true, edge: sp.edge, label: 'Ship', sub: '', kind: 'ship', color: '#ffb45e' });
+        const apsis = [];
+        if (el.ecc > 0.01 && el.pe > f.radius) apsis.push(['pe', 'Pe', this.orbitLine.pe, el.pe]);
+        if (el.ecc > 0.01 && el.ecc < 1 && el.ap < orbitFloor(f) * 3) apsis.push(['ap', 'Ap', this.orbitLine.ap, el.ap]);
+        for (const [id, label, local, r] of apsis) {
+          const wp = f.toWorld(local, new THREE.Vector3());
+          // hidden behind the planet
+          const cam = this.rig.worldPos;
+          const d = _v.subVectors(wp, cam);
+          const t = Math.max(0, Math.min(1, _v2.subVectors(f.position, cam).dot(d) / d.lengthSq()));
+          if (d.multiplyScalar(t).add(cam).distanceTo(f.position) < f.radius) continue;
+          const p = this.project(wp, tmp);
+          if (!p.edge) markers.push({ id, x: p.x, y: p.y, visible: true, label, sub: fmtDist(r - f.radius), kind: 'apsis', color: r < orbitFloor(f) ? '#ffb080' : '#9fdcff' });
+        }
+      }
+      if (s.state === 'flying' && this.landSite && s.canLand() === null && s.frame instanceof Planet) {
+        const f = s.frame;
+        const g = this.landSite.clone().multiplyScalar(f.radius + Math.max(0, f.heightAt(this.landSite)) + 1);
+        const p = this.project(f.toWorld(g, new THREE.Vector3()), tmp);
+        markers.push({ id: 'land', x: p.x, y: p.y, visible: !p.edge, label: 'Landing site', sub: '', kind: 'land', color: '#9dffb0' });
+      }
       for (let i = 0; i < this.fields.length; i++) {
         const f = this.fields[i];
         const p = this.project(f.position, tmp);
@@ -1962,9 +2148,34 @@ export class Game {
     hud.setMarkers(markers);
 
     let hint = null;
-    if (this.state.playTime < 90 && this.mode === 'foot') hint = '<kbd>LMB</kbd>Mine<br><kbd>RMB</kbd>Analyze<br><kbd>F</kbd>Scan<br><kbd>Tab</kbd>Inventory';
-    else if (this.state.playTime < 400 && this.mode === 'ship' && this.state.story.stage === 'explore') hint = '<kbd>Space</kbd>Pulse drive<br><kbd>Shift</kbd>Boost<br><kbd>F</kbd>Scan planet';
+    if (this.mode === 'ship' && this.ship.orbit) hint = '<kbd>W</kbd><kbd>S</kbd>Raise, lower orbit<br><kbd>A</kbd><kbd>D</kbd>Tilt orbit<br><kbd>Shift</kbd>Fast forward<br><kbd>Wheel</kbd>Zoom out<br><kbd>Space</kbd>Pulse where you look<br><kbd>C</kbd>Leave orbit';
+    else if (this.state.playTime < 90 && this.mode === 'foot') hint = '<kbd>LMB</kbd>Mine<br><kbd>RMB</kbd>Analyze<br><kbd>F</kbd>Scan<br><kbd>Tab</kbd>Inventory';
+    else if (this.state.playTime < 400 && this.mode === 'ship' && this.state.story.stage === 'explore' && !this.ship.orbit) hint = '<kbd>Space</kbd>Pulse drive<br><kbd>Shift</kbd>Boost<br><kbd>C</kbd>Orbit<br><kbd>RMB</kbd>Look around<br><kbd>F</kbd>Scan planet';
     hud.setHint(hint);
+  }
+
+  orbitSub(s) {
+    const o = s.orbit;
+    const f = s.frame;
+    const el = o.el;
+    if (o.settle < 1) return 'Matching speed';
+    if (el.ecc >= 1) return 'Escape path';
+    const floor = orbitFloor(f);
+    if (el.pe < floor) {
+      const t = timeToRadius(el, floor, o.mu);
+      const what = f.def.atmosphere ? 'Entry' : 'Descent';
+      return Number.isFinite(t) ? `${what} in ${fmtTime(t)}` : what;
+    }
+    if (el.ecc < 0.02) return `Circular · ${fmtTime(el.period)} per lap`;
+    return `Ap ${fmtDist(el.ap - f.radius)} · Pe ${fmtDist(el.pe - f.radius)}`;
+  }
+
+  // rough, the drive speeds up and slows down on its own
+  pulseEta(s, body) {
+    const d = s.worldPos(_v).distanceTo(body.position) - body.atmoRadius - 600;
+    if (d < 1000) return 'arriving';
+    const t = s.pulseSpool < 1 ? 3 : 0;
+    return `${Math.max(1, Math.round(Math.log(Math.max(1, d / 600)) / 0.9 + t))} s`;
   }
 
   localTime(body, local) {
@@ -1977,6 +2188,12 @@ export class Game {
     const mm = Math.floor((h - hh) * 60);
     return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
   }
+}
+
+function fmtTime(t) {
+  const m = Math.floor(t / 60);
+  const sec = Math.floor(t % 60);
+  return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
 function shipColors(seed) {

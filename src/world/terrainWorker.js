@@ -33,7 +33,7 @@ function handle(msg) {
       }
       const res = buildChunk(p.gen, p.terrain.radius, msg.face, msg.level, msg.x, msg.y, msg.N);
       res.id = msg.id;
-      self.postMessage(res, [res.positions.buffer, res.normals.buffer, res.data.buffer]);
+      self.postMessage(res, [res.positions.buffer, res.normals.buffer, res.data.buffer, res.index.buffer]);
       break;
     }
     case 'scatter': {

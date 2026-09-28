@@ -39,6 +39,8 @@ export class HUD {
     this.center = el('div', 'hud-center', this.root);
     this.crosshair = el('div', 'crosshair', this.center);
     this.nose = el('div', 'nose', this.root);
+    // flight path marker: where the ship is actually moving
+    this.fpm = el('div', 'fpm', this.root);
     this.scanRing = el('div', 'scan-ring', this.center);
     this.target = el('div', 'target-info', this.root);
     this.targetName = el('div', 'ti-name', this.target);
@@ -55,6 +57,7 @@ export class HUD {
     const bottom = el('div', 'hud-bottom', this.root);
     this.flight = el('div', 'flight', bottom);
     this.flightMode = el('div', 'flight-mode', this.flight);
+    this.flightSub = el('div', 'flight-sub', this.flight);
     const fr = el('div', 'flight-row', this.flight);
     const sp = el('div', 'readout', fr);
     this.speedVal = el('div', 'readout-val', sp);
@@ -146,6 +149,9 @@ export class HUD {
 
   updateFlight(f) {
     setText(this.flightMode, f.mode);
+    setText(this.flightSub, f.sub || '');
+    this.flight.classList.toggle('orbiting', !!f.orbit);
+    this.root.dataset.orbit = f.orbit ? '1' : '';
     setText(this.speedVal, fmtSpeed(f.speed));
     setText(this.altVal, f.alt === Infinity || f.alt > 1e7 ? '--' : fmtDist(Math.max(0, f.alt)));
     this.throttleFill.style.width = `${Math.max(0, f.throttle) * 100}%`;
@@ -159,8 +165,23 @@ export class HUD {
     this.healthFill.style.width = `${s.health * 100}%`;
     this.jetFill.style.width = `${s.jet * 100}%`;
     this.hazardRow.classList.toggle('warn', s.shield < 0.25 && s.hazardActive);
+    this.vignette._h = null;
     this.vignette.style.opacity = s.danger.toFixed(2);
     this.vignette.style.setProperty('--vig', s.dangerColor || '255,60,40');
+  }
+
+  setVelocity(x, y, visible) {
+    this.fpm.style.display = visible ? '' : 'none';
+    if (visible) this.fpm.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+  }
+
+  // entry heat tints the screen edges, shares the element with suit hazards
+  setHeat(k) {
+    const v = (Math.min(1, k) * 0.9).toFixed(2);
+    if (this.vignette._h === v) return;
+    this.vignette._h = v;
+    this.vignette.style.opacity = v;
+    this.vignette.style.setProperty('--vig', '255,120,40');
   }
 
   setNose(x, y, visible) {

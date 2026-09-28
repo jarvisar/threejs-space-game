@@ -1,6 +1,6 @@
 import { RNG, hashCombine } from '../core/rng.js';
 import { STAR_CLASSES, CORE_INDEX } from './galaxy.js';
-import { PLANET_TYPES, GAS_PALETTES, buildPalette, buildTerrain, roll } from './planetTypes.js';
+import { PLANET_TYPES, GAS_PALETTES, buildPalette, buildTerrain, buildLandforms, roll } from './planetTypes.js';
 import { planetName, makeName } from './names.js';
 
 // Some systems have a comet, the start system always does. Own RNG so
@@ -78,6 +78,8 @@ export function makeRockyPlanet(seed, typeId, radius, opts = {}) {
   }
 
   const maxH = terrain.contAmp + terrain.mountAmp + terrain.hillAmp + terrain.pillarAmp;
+  // after maxH so atmosphere and cloud heights stay what they were
+  buildLandforms(terrain, typeId);
   let atmosphere = null;
   if (hasAtmo) {
     const thick = type.thickness * rng.range(0.85, 1.15);

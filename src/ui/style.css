@@ -152,6 +152,9 @@ body {
   background: rgba(230, 245, 255, 0.85);
   box-shadow: 0 0 6px rgba(120, 220, 255, 0.9);
 }
+.hud[data-orbit='1'] .crosshair {
+  display: none;
+}
 .hud[data-mode='ship'] .crosshair {
   left: -14px;
   top: -14px;
@@ -173,6 +176,38 @@ body {
   display: none;
 }
 .hud:not([data-mode='ship']) .nose {
+  display: none !important;
+}
+/* velocity marker, a small circle with wings */
+.fpm {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  display: none;
+}
+.fpm::before,
+.fpm::after {
+  content: '';
+  position: absolute;
+}
+.fpm::before {
+  left: -6px;
+  top: -6px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid rgba(157, 255, 176, 0.85);
+  border-radius: 50%;
+}
+.fpm::after {
+  left: -16px;
+  top: -1px;
+  width: 32px;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(157, 255, 176, 0.85) 30%, transparent 30%, transparent 70%, rgba(157, 255, 176, 0.85) 70%);
+}
+.hud:not([data-mode='ship']) .fpm {
   display: none !important;
 }
 .scan-ring {
@@ -426,6 +461,15 @@ kbd {
   color: #fff;
   text-shadow: 0 0 12px var(--accent);
 }
+.flight-sub {
+  min-height: 16px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--ui-dim);
+}
+.flight.orbiting .flight-mode {
+  color: #9dffb0;
+}
 .flight-row {
   display: flex;
   justify-content: space-between;
@@ -607,6 +651,27 @@ kbd {
   top: 3px;
   font-size: 12px;
   color: var(--ui-dim);
+}
+.marker.apsis .marker-icon {
+  width: 6px;
+  height: 6px;
+  left: -5px;
+  top: -5px;
+  border-radius: 50%;
+  background: var(--mc);
+}
+.marker.land .marker-icon {
+  width: 22px;
+  height: 22px;
+  left: -13px;
+  top: -13px;
+  border-radius: 50%;
+  border-style: dashed;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.prompt .dim {
+  color: var(--ui-dim);
+  font-weight: 400;
 }
 .marker.edge .marker-label,
 .marker.edge .marker-sub {

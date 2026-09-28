@@ -93,6 +93,8 @@ export class StarSystem {
   }
 }
 
-function soiRadius(b) {
-  return Math.max(b.atmoRadius * 1.35, b.radius + 2500);
+// Also the outer edge of the orbit band. Twice the radius leaves room for
+// orbits a few km up without reaching a moon's space.
+export function soiRadius(b) {
+  return Math.max(b.atmoRadius * 1.35, b.radius * 2, b.radius + 2500);
 }

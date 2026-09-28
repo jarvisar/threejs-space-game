@@ -137,14 +137,36 @@ export function patchStandard(material, opts = {}) {
   return material;
 }
 
-// Terrain material. Coloring runs from height, moisture and slope so every
-// planet can use the same program with different uniforms.
+// What the terrain's feature mask (third aData channel) means per planet
+// type: the color it paints, how much, and how strongly it glows.
+function terrainFeature(def) {
+  const pal = def.palette;
+  const c = (hex) => new THREE.Color(hex);
+  switch (def.type) {
+    case 'volcanic': return { col: c(pal.oceanShallow), mix: 0.95, glow: 2.4 };
+    case 'radioactive': return { col: c(pal.glow), mix: 0.85, glow: 1.3 };
+    case 'toxic': return { col: c(pal.oceanShallow), mix: 0.9, glow: 0.45 };
+    case 'exotic': return { col: c(pal.glow), mix: 0.85, glow: 1.1 };
+    // glassy blue ice sheets
+    case 'frozen': return { col: c(pal.peak).lerp(c(pal.oceanDeep), 0.7), mix: 0.85, glow: 0 };
+    // bright ejecta around fresh craters
+    case 'barren':
+    case 'dead': return { col: c(pal.peak).lerp(c('#ffffff'), 0.3), mix: 0.45, glow: 0 };
+    default: return { col: c(pal.sand), mix: 0, glow: 0 };
+  }
+}
+
+// Terrain material. Coloring runs from height, moisture, slope and the
+// feature mask so every planet can use the same program with different uniforms.
 export function createTerrainMaterial(def, planetUniforms) {
   const pal = def.palette;
   const col = (hex) => ({ value: new THREE.Color(hex) });
   const snowLine = def.type === 'frozen' ? def.maxHeight * 0.3 : def.type === 'lush' || def.type === 'ocean' ? def.maxHeight * 0.62 : def.type === 'barren' || def.type === 'radioactive' ? def.maxHeight * 0.85 : 1e5;
   const polar = def.type === 'frozen' ? 0.35 : def.type === 'lush' || def.type === 'ocean' ? 0.14 : def.type === 'barren' ? 0.08 : 0.0;
   const vegAmount = { lush: 1, ocean: 1, toxic: 0.8, exotic: 0.8, radioactive: 0.45, desert: 0.2, frozen: 0.3, volcanic: 0.25, barren: 0.12, dead: 0 }[def.type] ?? 0.5;
+  const feat = terrainFeature(def);
+  // arid and airless rock shows its layers more
+  const strataK = { desert: 1, barren: 0.85, radioactive: 0.75, exotic: 0.8, volcanic: 0.6, dead: 0.35, frozen: 0.45 }[def.type] ?? 0.6;
 
   const uniforms = {
     uCenter: planetUniforms.center,
@@ -165,7 +187,12 @@ export function createTerrainMaterial(def, planetUniforms) {
     uSeed: { value: (def.seed % 1000) * 0.137 },
     uLava: { value: def.ocean && def.ocean.mode === 'lava' ? 1 : 0 },
     // thickness of the rock layers on cliffs, in meters
-    uStrata: { value: 5 + (def.seed % 7) },
+    uStrata: { value: def.type === 'desert' ? 4 + (def.seed % 4) : 5 + (def.seed % 7) },
+    uStrataK: { value: strataK },
+    uFeatCol: { value: feat.col },
+    uFeatMix: { value: feat.mix },
+    uFeatGlow: { value: feat.glow },
+    uFeatRough: { value: def.type === 'frozen' ? 0.3 : 0.9 },
     uFacet: { value: 0.6 },
     uScanPos: planetUniforms.scanPos,
     uScanRadius: planetUniforms.scanRadius,
@@ -187,26 +214,29 @@ export function createTerrainMaterial(def, planetUniforms) {
     noise: true,
     uniforms,
     vertexPars: /* glsl */ `
-      attribute vec2 aData;
+      attribute vec3 aData;
       uniform vec3 uCenter;
       uniform mat3 uRot;
-      varying vec2 vData;
+      varying vec3 vData;
       varying vec3 vGeoNormalW;
       flat varying vec3 vFaceP;
     `,
     vertexBegin: `vData = aData;`,
     vertexEnd: `vGeoNormalW = normalize(mat3(modelMatrix) * objectNormal); vFaceP = uRot * (vWorldPosP - uCenter);`,
     fragmentPars: /* glsl */ `
-      varying vec2 vData;
+      varying vec3 vData;
       varying vec3 vGeoNormalW;
       flat varying vec3 vFaceP;
       uniform vec3 uCenter;
-      uniform vec3 uColSand, uColLow, uColMid, uColHigh, uColCliff, uColPeak, uColVeg, uColVeg2, uColDeep;
-      uniform float uMaxH, uSnowLine, uPolar, uHasOcean, uVegAmount, uSeed, uLava, uStrata, uFacet;
+      uniform vec3 uColSand, uColLow, uColMid, uColHigh, uColCliff, uColPeak, uColVeg, uColVeg2, uColDeep, uFeatCol;
+      uniform float uMaxH, uSnowLine, uPolar, uHasOcean, uVegAmount, uSeed, uLava, uStrata, uStrataK, uFacet;
+      uniform float uFeatMix, uFeatGlow, uFeatRough;
       uniform vec3 uScanPos;
       uniform float uScanRadius;
       uniform mat3 uRot;
       float gRough;
+      float gGlow;
+      float gSlope;
       float faceHash(vec3 p) {
         uvec3 q = uvec3(ivec3(floor(p * 3.0)) + 65536);
         uint h = (q.x * 1597334677u) ^ (q.y * 3812015801u) ^ (q.z * 2798796415u);
@@ -223,47 +253,71 @@ export function createTerrainMaterial(def, planetUniforms) {
         float dist = length(vWorldPosP);
         float h = vData.x;
         float m = vData.y;
+        float fm = clamp(vData.z, 0.0, 1.0);
+        // negative feature values are dark maria on airless worlds
+        float maria = clamp(-vData.z, 0.0, 1.0);
+        // slope is 1 - cos(angle): 0.06 is about 20 degrees, 0.13 30, 0.23 40
         float slope = 1.0 - dot(normalize(vGeoNormalW), normalize(pw));
+        gSlope = slope;
         // anything smaller than a few hundred meters is faded out with
         // distance, from orbit it would only speckle
         float fine = 1.0 - smoothstep(300.0, 2000.0, dist);
         float n1 = snoise(p * 0.0035 + uSeed);
         float n2 = snoise(p * 0.028 + uSeed * 2.0) * fine;
-        float hj = h / uMaxH + n1 * 0.07 + n2 * 0.03;
+        float hj = h / uMaxH + n1 * 0.06 + n2 * 0.02;
 
-        vec3 c = mix(uColLow, uColMid, smoothstep(0.08, 0.32, hj));
-        c = mix(c, uColHigh, smoothstep(0.42, 0.7, hj));
+        // soft pastel altitude bands
+        vec3 c = mix(uColLow, uColMid, smoothstep(0.08, 0.28, hj));
+        c = mix(c, uColHigh, smoothstep(0.42, 0.64, hj));
+        // dry worlds: sand pools in the low flats and basins
+        float flats = (1.0 - uHasOcean) * (1.0 - smoothstep(0.03, 0.12, hj)) * (1.0 - smoothstep(0.03, 0.09, slope));
+        c = mix(c, uColSand, flats * 0.8);
+        c = mix(c, uColDeep, maria * 0.7);
 
-        // big soft vegetation regions, no small patches
+        // grass in patches on the wetter gentle ground, soil between
         float vpatch = snoise(p * 0.012 + uSeed * 3.0) * fine;
-        float veg = smoothstep(0.38, 0.62, m + n2 * 0.15 + vpatch * 0.15) * (1.0 - smoothstep(0.38, 0.6, hj)) * uVegAmount;
-        vec3 vegCol = mix(uColVeg2, uColVeg, smoothstep(0.35, 0.8, m + n1 * 0.25 + vpatch * 0.2));
-        c = mix(c, vegCol, veg * (1.0 - smoothstep(0.18, 0.3, slope)));
+        float wet = m + vpatch * 0.12 + n2 * 0.05;
+        float veg = smoothstep(0.38, 0.54, wet) * (1.0 - smoothstep(0.4, 0.6, hj)) * uVegAmount;
+        vec3 vegCol = mix(uColVeg2, uColVeg, smoothstep(0.48, 0.8, wet + n1 * 0.15));
+        // soft lighter patches through the meadows
+        vegCol = mix(vegCol, uColVeg2, smoothstep(0.1, 0.7, vpatch * 0.8 + n1 * 0.5) * 0.45);
+        c = mix(c, vegCol, veg * (1.0 - smoothstep(0.06, 0.13, slope)));
 
         float under = uHasOcean * (1.0 - smoothstep(-10.0, -0.5, h));
         c = mix(c, uColDeep, under);
-        float beach = (1.0 - smoothstep(0.8, 2.6 + n2 * 1.2, h)) * step(-14.0, h) * uHasOcean * (1.0 - uLava);
-        c = mix(c, uColSand, beach * (1.0 - smoothstep(0.35, 0.55, slope)));
+        float beach = (1.0 - smoothstep(0.8, 2.8 + n2 * 0.6, h)) * step(-14.0, h) * uHasOcean * (1.0 - uLava);
+        c = mix(c, uColSand, beach * (1.0 - smoothstep(0.3, 0.5, slope)));
         // scorched shoreline next to lava
         c = mix(c, uColCliff * 0.4, uLava * (1.0 - smoothstep(0.5, 4.0, h)));
 
-        // cliffs show layered rock, bands warped a little so they aren't
-        // perfect contour lines
-        float cliff = smoothstep(0.26, 0.4, slope + n2 * 0.05);
-        float layer = floor(h / uStrata + snoise(p * 0.01 + uSeed) * 0.7);
+        // bare ground on medium slopes, layered rock on steep ones. The
+        // bands are warped a little so they aren't perfect contour lines.
+        c = mix(c, mix(c, uColCliff, 0.45), smoothstep(0.08, 0.2, slope));
+        float cliff = smoothstep(0.2, 0.32, slope + n2 * 0.04);
+        float band = h / uStrata + snoise(p * 0.008 + uSeed) * 0.45;
+        float layer = floor(band);
         float tone = fract(layer * 0.618 + uSeed);
-        vec3 cliffCol = mix(uColCliff, uColHigh, tone * 0.6) * (0.86 + 0.28 * fract(layer * 0.371));
-        c = mix(c, cliffCol, cliff);
+        vec3 rock = mix(uColCliff, uColHigh, 0.2 + 0.55 * tone * uStrataK);
+        // pale seams between some of the layers
+        float seam = smoothstep(0.8, 0.86, fract(band)) * step(0.5, fract(layer * 0.37)) * uStrataK * fine;
+        rock = mix(rock, mix(uColSand, uColPeak, 0.35), seam * 0.3);
+        c = mix(c, rock, cliff);
 
         float lat = abs(up.y);
         float snow = smoothstep(uSnowLine - 20.0, uSnowLine + 20.0, h + n1 * 40.0);
         snow += smoothstep(0.98 - uPolar, 1.02 - uPolar, lat + n1 * 0.04) * step(0.001, uPolar);
-        snow = clamp(snow, 0.0, 1.0) * (1.0 - smoothstep(0.35, 0.55, slope));
+        // settles on the flats, cliffs stay bare
+        snow = clamp(snow, 0.0, 1.0) * (1.0 - smoothstep(0.2, 0.34, slope));
         c = mix(c, uColPeak, snow);
+
+        // lava, glass, ice sheets, pools, ejecta, depending on the planet type
+        float fk = fm * uFeatMix;
+        c = mix(c, uFeatCol, fk);
+        gGlow = fm * uFeatGlow * (0.85 + 0.15 * sin(uTime * 1.3 + n1 * 9.0 + n2 * 3.0));
 
         c *= 0.97 + 0.06 * faceHash(vFaceP);
         diffuseColor.rgb = c;
-        gRough = mix(0.95, 0.55, snow);
+        gRough = mix(mix(0.95, 0.55, snow), uFeatRough, fk);
 
         // scanner pulse ring, uScanPos is planet-fixed
         if (uScanRadius > 0.0) {
@@ -279,11 +333,20 @@ export function createTerrainMaterial(def, planetUniforms) {
         // same flat normal three uses for flatShading
         vec3 fnV = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition)));
         if (dot(fnV, normal) < 0.0) fnV = -fnV;
-        normal = normalize(mix(normal, fnV, uFacet));
+        // less on cliffs, where neighboring triangles tilt very differently
+        // and full facets read as a comb of teeth
+        normal = normalize(mix(normal, fnV, uFacet * (1.0 - 0.7 * smoothstep(0.12, 0.35, gSlope))));
+      }
+    `,
+    emissive: /* glsl */ `
+      {
+        vec3 upG = normalize(vWorldPosP - uAmbCenter);
+        float nightK = 1.0 - smoothstep(-0.12, 0.18, dot(upG, normalize(uSunPos - uAmbCenter)));
+        totalEmissiveRadiance += uFeatCol * gGlow * (0.55 + 0.9 * nightK);
       }
     `,
   });
-  // roughness from the snow mask
+  // roughness from the snow and feature masks
   const prevCompile = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader) => {
     prevCompile(shader);
