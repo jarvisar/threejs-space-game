@@ -1,5 +1,6 @@
 import { RESOURCES } from './resources.js';
 
+// the game's old name, kept so existing saves still load
 const SAVE_KEY = 'starsong-save-v1';
 
 // Everything that persists between sessions. Plain data only so it can go

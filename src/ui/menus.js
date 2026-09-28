@@ -77,7 +77,7 @@ export class Menus {
   buildTitle() {
     const t = el('div', 'screen title-screen', this.root);
     const inner = el('div', 'title-inner', t);
-    el('div', 'title-name', inner, 'STARSONG');
+    el('div', 'title-name', inner, 'SPACE GAME');
     const btns = el('div', 'title-buttons', inner);
     this.btnContinue = el('button', 'btn primary', btns, 'Continue');
     this.btnNew = el('button', 'btn', btns, 'New Game');

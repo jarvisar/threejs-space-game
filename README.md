@@ -1,4 +1,4 @@
-# Starsong
+# Space Game
 
 A procedural space exploration game for the browser, built with Three.js. Land on low poly planets, fly between them without loading screens, and follow a signal across a galaxy of 24,000 star systems toward its core.
 

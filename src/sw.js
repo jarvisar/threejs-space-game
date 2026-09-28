@@ -1,7 +1,7 @@
 // Service worker for the production build. vite.config.js copies this to
 // dist/sw.js and puts VERSION and FILES (the build output to cache) above it.
 
-const CACHE = `starsong-${VERSION}`;
+const CACHE = `space-game-${VERSION}`;
 
 self.addEventListener('install', (e) => {
   // Revalidate instead of trusting the HTTP cache. GitHub Pages sends
@@ -13,7 +13,8 @@ self.addEventListener('install', (e) => {
 });
 
 self.addEventListener('activate', (e) => {
-  const old = (k) => k.startsWith('starsong-') && k !== CACHE;
+  // starsong- is what the caches were called before the rename
+  const old = (k) => (k.startsWith('space-game-') || k.startsWith('starsong-')) && k !== CACHE;
   e.waitUntil(
     caches
       .keys()

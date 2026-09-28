@@ -13,7 +13,7 @@ const NO_CACHE = [/^sw\.js$/, /^screenshots\//, /^icons\//, /^og-image\./, /^rob
 function serviceWorker() {
   let root, outDir;
   return {
-    name: 'starsong-service-worker',
+    name: 'space-game-service-worker',
     apply: 'build',
     configResolved(config) {
       root = config.root;

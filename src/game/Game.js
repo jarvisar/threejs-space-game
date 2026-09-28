@@ -49,6 +49,7 @@ const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 
+// old name like the save key, renaming it would reset everyone's settings
 const SETTINGS_KEY = 'starsong-settings';
 
 // photo mode looks, cycled with V. The first one is the normal game grade.
@@ -1121,7 +1122,7 @@ export class Game {
   // preserveDrawingBuffer is needed
   savePhoto() {
     const body = this.system.focus;
-    const name = `starsong-${this.systemDef.name}${body ? '-' + body.def.name : ''}`.replace(/[^\w-]+/g, '-').toLowerCase();
+    const name = `space-game-${this.systemDef.name}${body ? '-' + body.def.name : ''}`.replace(/[^\w-]+/g, '-').toLowerCase();
     this.renderer.domElement.toBlob((blob) => {
       if (!blob) return;
       const download = () => {

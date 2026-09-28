@@ -1,6 +1,6 @@
 {
-  "name": "Starsong",
-  "short_name": "Starsong",
+  "name": "Space Game",
+  "short_name": "Space Game",
   "description": "A free space exploration game for the browser. Land on procedural planets, fly between them without loading screens and warp across 24,000 star systems.",
   "start_url": "./",
   "scope": "./",

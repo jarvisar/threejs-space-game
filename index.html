@@ -5,7 +5,7 @@
     <!-- viewport-fit lets the game draw under notches (the HUD keeps to the safe
          area), and no zoom stops iOS zooming in when the seed box gets focus -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-    <title>Starsong | Procedural Space Exploration Game in the Browser</title>
+    <title>Space Game | Procedural Space Exploration in the Browser</title>
     <meta name="description" content="A free space exploration game for the browser. Land on procedural planets, fly between them without loading screens and warp across 24,000 star systems." />
     <link rel="canonical" href="https://spacegame.jarvisar.com/" />
     <meta name="theme-color" content="#000000" />
@@ -16,21 +16,21 @@
     <link rel="manifest" href="/manifest.webmanifest" />
 
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Starsong" />
-    <meta property="og:title" content="Starsong | Procedural Space Exploration Game" />
+    <meta property="og:site_name" content="Space Game" />
+    <meta property="og:title" content="Space Game | Procedural Space Exploration" />
     <meta property="og:description" content="A free space exploration game for the browser. Land on procedural planets, fly between them without loading screens and warp across 24,000 star systems." />
     <meta property="og:url" content="https://spacegame.jarvisar.com/" />
     <meta property="og:image" content="https://spacegame.jarvisar.com/og-image.jpg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Starsong title screen with a ringed planet" />
+    <meta property="og:image:alt" content="Space Game title screen with a ringed planet" />
     <meta name="twitter:card" content="summary_large_image" />
 
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "VideoGame",
-        "name": "Starsong",
+        "name": "Space Game",
         "url": "https://spacegame.jarvisar.com/",
         "description": "A free space exploration game for the browser. Land on procedural planets, fly between them without loading screens and warp across 24,000 star systems.",
         "image": "https://spacegame.jarvisar.com/og-image.jpg",
@@ -103,7 +103,7 @@
         animation: boot-in 0.8s 0.1s both;
       }
       .boot-name {
-        font-size: clamp(34px, 9vw, 120px);
+        font-size: clamp(26px, 7.2vw, 100px);
         font-weight: 300;
         letter-spacing: 0.42em;
         margin-right: -0.42em;
@@ -167,7 +167,7 @@
           margin-top: calc(-6vh / 1.25);
         }
         .boot-name {
-          font-size: clamp(34px, calc(9vw / 1.25), 120px);
+          font-size: clamp(26px, calc(7.2vw / 1.25), 100px);
         }
       }
       @media (min-width: 3200px) and (min-height: 1800px) {
@@ -176,7 +176,7 @@
           margin-top: calc(-6vh / 1.5);
         }
         .boot-name {
-          font-size: clamp(34px, calc(9vw / 1.5), 120px);
+          font-size: clamp(26px, calc(7.2vw / 1.5), 100px);
         }
       }
 
@@ -242,7 +242,7 @@
       {
         "@context": "https://schema.org",
         "@type": "WebSite",
-        "name": "Starsong",
+        "name": "Space Game",
         "url": "https://spacegame.jarvisar.com/"
       }
     </script>
@@ -252,7 +252,7 @@
     <div id="ui"></div>
     <div id="boot" aria-hidden="true">
       <div class="boot-inner">
-        <div class="boot-name">STARSONG</div>
+        <div class="boot-name">SPACE GAME</div>
         <div class="boot-load">
           <div class="boot-bar"><i></i></div>
           <div class="boot-label">Loading</div>
@@ -261,7 +261,7 @@
     </div>
     <!-- Readable without JavaScript or WebGL. Hidden once the game starts. -->
     <main id="about">
-      <h1>Starsong</h1>
+      <h1>Space Game</h1>
       <p>A free space exploration game for the browser. Land on procedural planets, fly between them without loading screens and follow a signal across a galaxy of 24,000 star systems toward its core.</p>
       <p>Needs a browser with WebGL2. Plays with a mouse and keyboard or with touch.</p>
       <noscript><p>JavaScript is turned off, so the game can't start.</p></noscript>

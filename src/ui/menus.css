@@ -185,7 +185,7 @@
   margin-top: calc(-6vh / var(--z));
 }
 .title-name {
-  font-size: clamp(34px, calc(9vw / var(--z)), 120px);
+  font-size: clamp(26px, calc(7.2vw / var(--z)), 100px);
   font-weight: 300;
   letter-spacing: 0.42em;
   margin-right: -0.42em;
