@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { NOISE_GLSL } from '../render/shaders/noise.glsl.js';
-import { STAR_CLASSES, CLASS_KEYS } from '../gen/galaxy.js';
+import { STAR_CLASSES, CLASS_KEYS, CORE_INDEX } from '../gen/galaxy.js';
 import { RNG } from '../core/rng.js';
 
 // Background sky built from the real galaxy: every other star system is drawn
@@ -148,10 +148,10 @@ export class Sky {
     this.group.add(fillPts);
   }
 
-  // starIndex -2 is the galactic core itself
   setSystem(starIndex) {
     const g = this.galaxy;
-    const [cx, cy, cz] = starIndex === -2 ? [0.5, 0.5, 0.5] : g.pos(starIndex);
+    // the core is at the origin, sit just off it so the core direction below isn't NaN
+    const [cx, cy, cz] = starIndex === CORE_INDEX ? [0.5, 0.5, 0.5] : g.pos(starIndex);
     const pos = this.starGeo.attributes.position.array;
     const col = this.starGeo.attributes.aColor.array;
     const size = this.starGeo.attributes.aSize.array;

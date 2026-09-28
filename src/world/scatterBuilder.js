@@ -1,14 +1,10 @@
 import { faceDir } from '../gen/terrain.js';
 import { RNG, hash3 } from '../core/rng.js';
+import { smoothstep } from '../core/math.js';
 
 // Places flora and rocks inside one scatter cell (a quadtree node at a fixed
 // level). Placement only depends on the cell coords and species seed, so the
 // same plants come back every time the cell is regenerated.
-
-function smoothstep(a, b, x) {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-}
 
 export function buildScatter(gen, terrain, msg) {
   const R = terrain.radius;

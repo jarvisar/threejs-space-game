@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { faceDir } from '../gen/terrain.js';
+import { forEachCellNear } from '../gen/terrain.js';
 import { placementFields } from '../gen/flora.js';
 import { buildSpeciesGeometry, materialKind } from './floraGeometry.js';
 import { patchStandard } from '../render/materials.js';
@@ -219,6 +219,7 @@ export class Scatter {
     this.lastSync = -1;
     this.dataChanged = true;
     this.shadowKey = '';
+    this.clearing = null;
 
     for (const sp of species) {
       const resColor = RESOURCES[sp.res] ? RESOURCES[sp.res].color : '#6fd6ff';
@@ -252,38 +253,36 @@ export class Scatter {
     }
   }
 
-  // kept so existing callers still work
-  get meshes() {
-    return this.slots.map((s) => s.mesh);
-  }
-
   key(face, x, y) {
     return `${face}:${x}:${y}`;
   }
 
-  // enumerate cells whose center is within radius of the local position
-  cellsNear(local, radius, out) {
-    const R = this.planet.radius;
-    const dir = _v.copy(local).normalize();
-    const L = this.level;
-    const walk = (face, level, x, y) => {
-      const size = 2 / (1 << level);
-      const d = faceDir(face, -1 + (x + 0.5) * size, -1 + (y + 0.5) * size, [0, 0, 0]);
-      const dot = d[0] * dir.x + d[1] * dir.y + d[2] * dir.z;
-      const ang = Math.acos(Math.max(-1, Math.min(1, dot)));
-      const half = ((R * Math.PI) / 2 / (1 << level)) * 0.75;
-      if (ang * R > radius + half) return;
-      if (level === L) {
-        out.push({ face, x, y, dist: ang * R });
-        return;
+  // Hides everything within radius of a planet-local point, so rocks and trees
+  // don't poke through the landed ship. null clears it.
+  setClearing(pos, radius) {
+    const old = this.clearing;
+    if (!pos && !old) return;
+    if (pos && old && old.pos.distanceToSquared(pos) < 0.25) return;
+    this.clearing = pos ? { pos: pos.clone(), r2: radius * radius } : null;
+    // refill the cells around the old and new spot
+    for (const c of [old, this.clearing]) {
+      if (!c) continue;
+      for (const cell of this.cells.values()) {
+        if (cell.center && cell.center.distanceTo(c.pos) < this.cellSize * 1.5) for (const slot of this.slots) slot.release(cell.key);
       }
-      walk(face, level + 1, x * 2, y * 2);
-      walk(face, level + 1, x * 2 + 1, y * 2);
-      walk(face, level + 1, x * 2, y * 2 + 1);
-      walk(face, level + 1, x * 2 + 1, y * 2 + 1);
-    };
-    for (let f = 0; f < 6; f++) walk(f, 0, 0, 0);
-    return out;
+    }
+    this.shadowKey = '';
+    this.dataChanged = true;
+  }
+
+  // mined, or inside the clearing. Builds the id string only when something
+  // was mined, this runs for every instance when cells fill.
+  hidden(cellKey, s, k, pos) {
+    if (this.removed.size && this.removed.has(`${cellKey}:${s}:${k}`)) return true;
+    const c = this.clearing;
+    if (!c) return false;
+    const dx = pos[k * 3] - c.pos.x, dy = pos[k * 3 + 1] - c.pos.y, dz = pos[k * 3 + 2] - c.pos.z;
+    return dx * dx + dy * dy + dz * dz < c.r2;
   }
 
   update(local, time) {
@@ -292,7 +291,8 @@ export class Scatter {
     this.lastSync = time;
     this.dataChanged = false;
 
-    const wanted = this.cellsNear(local, FAR_RADIUS, []);
+    const wanted = [];
+    forEachCellNear(this.planet.radius, this.level, _v.copy(local).normalize(), FAR_RADIUS, (face, x, y, dist) => wanted.push({ face, x, y, dist }));
     const keep = new Set();
     for (const c of wanted) {
       const k = this.key(c.face, c.x, c.y);
@@ -351,11 +351,10 @@ export class Scatter {
     const sp = this.species[s];
     const tint = sp.plant || sp.kind === 'crystal';
     const ox = cell.center.x, oy = cell.center.y, oz = cell.center.z;
-    const removed = this.removed;
     slot.set(cell.key, d.count, (arr, start, col) => {
       for (let k = 0; k < d.count; k++) {
         const dst = (start + k) * 16;
-        if (removed.size && removed.has(`${cell.key}:${s}:${k}`)) {
+        if (this.hidden(cell.key, s, k, d.pos)) {
           arr.fill(0, dst, dst + 16);
           continue;
         }
@@ -397,7 +396,7 @@ export class Scatter {
         const d = data.find((x) => x.sp === s);
         if (!d) continue;
         for (let k = 0; k < d.count; k++) {
-          if (this.removed.size && this.removed.has(`${cell.key}:${s}:${k}`)) continue;
+          if (this.hidden(cell.key, s, k, d.pos)) continue;
           if (n >= mesh.instanceMatrix.count) break;
           const src = k * 16, dst = n * 16;
           for (let j = 0; j < 12; j++) arr[dst + j] = d.mats[src + j];
@@ -484,9 +483,8 @@ export class Scatter {
             if (c2 > r * r) continue;
             const t = b - Math.sqrt(r * r - c2);
             if (!best || t < best.t) {
-              const id = `${cell.key}:${d.sp}:${k}`;
-              if (this.removed.has(id)) continue;
-              best = { t, id, species: sp, scale: s, pos: new THREE.Vector3(px, py, pz), center: new THREE.Vector3(cx + origin.x, cy + origin.y, cz + origin.z), radius: r };
+              if (this.hidden(cell.key, d.sp, k, d.pos)) continue;
+              best = { t, id: `${cell.key}:${d.sp}:${k}`, species: sp, scale: s, pos: new THREE.Vector3(px, py, pz), center: new THREE.Vector3(cx + origin.x, cy + origin.y, cz + origin.z), radius: r };
             }
           }
         }
@@ -507,7 +505,7 @@ export class Scatter {
           const px = d.pos[k * 3], py = d.pos[k * 3 + 1], pz = d.pos[k * 3 + 2];
           const dx = px - local.x, dy = py - local.y, dz = pz - local.z;
           if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
-          if (this.removed.has(`${cell.key}:${d.sp}:${k}`)) continue;
+          if (this.hidden(cell.key, d.sp, k, d.pos)) continue;
           out.push({ pos: new THREE.Vector3(px, py, pz), radius: sp.collider * d.scales[k], height: sp.colH * d.scales[k] });
         }
       }

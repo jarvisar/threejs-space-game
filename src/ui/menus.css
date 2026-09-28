@@ -32,11 +32,28 @@
   max-height: 88vh;
   overflow: auto;
 }
-.panel.narrow {
-  width: 460px;
+.panel.pause {
+  width: min(960px, 94vw);
+  display: grid;
+  grid-template-columns: 330px 1fr;
+  gap: 34px;
+  align-items: start;
+}
+.pause-main {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.pause-main h4,
+.controls-panel h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--warm);
+}
+.pause-main h4 {
+  margin: 14px 0 0;
 }
 .panel.wide {
   width: min(1100px, 94vw);
@@ -76,6 +93,12 @@
 .btn.primary:hover {
   background: rgba(140, 80, 20, 0.55);
 }
+.btn.warn,
+.btn.warn:hover {
+  border-color: var(--danger);
+  color: #ffd2cc;
+  background: rgba(110, 24, 16, 0.55);
+}
 .btn[disabled] {
   opacity: 0.35;
   cursor: default;
@@ -107,6 +130,7 @@
   text-transform: uppercase;
   color: var(--accent);
   margin: 4px 0 36px;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
 }
 .title-buttons {
   display: flex;
@@ -116,11 +140,23 @@
 .title-buttons .btn {
   min-width: 170px;
 }
+.save-info {
+  min-height: 19px;
+  margin-top: 12px;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--ui-dim);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+}
+.save-info.warn {
+  color: #ffb1a6;
+}
 .seed-row {
-  margin-top: 18px;
+  margin-top: 10px;
   font-size: 14px;
   color: var(--ui-dim);
   letter-spacing: 0.1em;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
   display: flex;
   gap: 10px;
   justify-content: center;
@@ -146,61 +182,72 @@
   color: var(--ui-dim);
   letter-spacing: 0.08em;
 }
+.title-pwa {
+  position: absolute;
+  top: 20px;
+  right: 22px;
+  display: flex;
+  gap: 8px;
+}
 .controls-panel {
   margin: 26px auto 0;
   display: flex;
-  gap: 34px;
+  flex-wrap: wrap;
+  gap: 18px 34px;
   justify-content: center;
   text-align: left;
   background: rgba(6, 12, 20, 0.7);
   padding: 16px 22px;
   border: 1px solid var(--ui-line);
-  width: fit-content;
+  max-width: 94vw;
+  box-sizing: border-box;
 }
+/* the pause menu shows it next to the settings */
 .controls-panel.small {
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 14px;
-  margin: 4px 0;
-  width: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 26px;
+  margin: 4px 0 0;
+  padding: 0;
+  background: none;
+  border: none;
 }
-.controls-panel h4 {
-  margin: 0 0 6px;
-  font-size: 13px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--warm);
-}
-.ctl {
-  display: flex;
-  gap: 8px;
+.ctl-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 10px;
+  align-items: center;
   font-size: 14px;
-  line-height: 1.7;
 }
-.controls-panel.small .ctl {
-  display: inline-flex;
-  margin-right: 14px;
-  line-height: 1.6;
-}
-.ctl kbd {
-  min-width: 34px;
+.ctl-grid kbd {
+  justify-self: start;
+  min-width: 22px;
+  margin: 0;
 }
 
 /* pause settings */
 .settings {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   font-size: 15px;
 }
 .settings label {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr 140px 42px;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
-.settings input[type='range'] {
-  width: 180px;
+.settings input {
+  margin: 0;
   accent-color: #7fe0ff;
+}
+.settings input[type='checkbox'] {
+  justify-self: start;
+}
+.settings output {
+  font-size: 14px;
+  color: var(--ui-dim);
+  text-align: right;
 }
 
 /* inventory */
@@ -501,6 +548,13 @@
   box-shadow: 0 0 6px var(--c);
   margin-right: 8px;
 }
+.gmap-legend i.ring {
+  width: 7px;
+  height: 7px;
+  background: none;
+  border: 1px solid #bfe0ff;
+  box-shadow: none;
+}
 .gmap-keys {
   margin-top: 8px;
 }
@@ -570,6 +624,28 @@
 }
 .gmap-info .btn {
   margin-top: 6px;
+}
+.gmap-hover {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 5px 10px 6px;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--ui-dim);
+  background: rgba(8, 15, 26, 0.82);
+  border: 1px solid var(--ui-line);
+  white-space: nowrap;
+  display: none;
+}
+.gmap-hover.show {
+  display: block;
+}
+.gmap-hover b {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--c);
 }
 
 /* fade + death */

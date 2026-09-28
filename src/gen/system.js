@@ -1,5 +1,5 @@
 import { RNG, hashCombine } from '../core/rng.js';
-import { STAR_CLASSES } from './galaxy.js';
+import { STAR_CLASSES, CORE_INDEX } from './galaxy.js';
 import { PLANET_TYPES, GAS_PALETTES, buildPalette, buildTerrain, roll } from './planetTypes.js';
 import { planetName, makeName } from './names.js';
 
@@ -35,7 +35,7 @@ function zoneFor(index, count, cls, rng) {
 
 function hazardFor(type, rng) {
   const [kind, a, b] = type.hazard;
-  return { type: kind, level: kind === 'none' ? rng.range(a, b) : rng.range(a, b) };
+  return { type: kind, level: rng.range(a, b) };
 }
 
 export function makeRockyPlanet(seed, typeId, radius, opts = {}) {
@@ -292,7 +292,7 @@ export function generateCoreSystem(galaxy) {
   const seed = hashCombine(galaxy.seed, 0xc0de);
   const rng = new RNG(seed);
   const sys = {
-    index: -2,
+    index: CORE_INDEX,
     seed,
     name: 'The Heart',
     cls: 'X',

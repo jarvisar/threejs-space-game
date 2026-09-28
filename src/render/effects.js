@@ -1,20 +1,10 @@
 import * as THREE from 'three';
 import { LAYER_POST } from './pipeline.js';
+import { radialTexture } from './textures.js';
 
 let dotTex = null;
 function dotTexture() {
-  if (dotTex) return dotTex;
-  const s = 32;
-  const c = document.createElement('canvas');
-  c.width = c.height = s;
-  const g = c.getContext('2d');
-  const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-  grd.addColorStop(0, 'rgba(255,255,255,1)');
-  grd.addColorStop(0.35, 'rgba(255,255,255,0.7)');
-  grd.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grd;
-  g.fillRect(0, 0, s, s);
-  dotTex = new THREE.CanvasTexture(c);
+  if (!dotTex) dotTex = radialTexture(32, [[0, 'rgba(255,255,255,1)'], [0.35, 'rgba(255,255,255,0.7)'], [1, 'rgba(255,255,255,0)']]);
   return dotTex;
 }
 

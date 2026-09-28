@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { NOISE_GLSL } from '../render/shaders/noise.glsl.js';
+import { radialTexture } from '../render/textures.js';
 
 const starVert = /* glsl */ `
 #include <common>
@@ -40,19 +41,7 @@ void main() {
 `;
 
 function glowTexture() {
-  const s = 256;
-  const c = document.createElement('canvas');
-  c.width = c.height = s;
-  const g = c.getContext('2d');
-  const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-  grd.addColorStop(0, 'rgba(255,255,255,1)');
-  grd.addColorStop(0.08, 'rgba(255,255,255,0.55)');
-  grd.addColorStop(0.25, 'rgba(255,255,255,0.14)');
-  grd.addColorStop(0.55, 'rgba(255,255,255,0.03)');
-  grd.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grd;
-  g.fillRect(0, 0, s, s);
-  const tex = new THREE.CanvasTexture(c);
+  const tex = radialTexture(256, [[0, 'rgba(255,255,255,1)'], [0.08, 'rgba(255,255,255,0.55)'], [0.25, 'rgba(255,255,255,0.14)'], [0.55, 'rgba(255,255,255,0.03)'], [1, 'rgba(255,255,255,0)']]);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }

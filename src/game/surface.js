@@ -8,11 +8,6 @@ import { RESOURCES } from './resources.js';
 
 const _v = new THREE.Vector3();
 
-const KIND_LABEL = {
-  rock: 'Rock', boulder: 'Boulder', obsidian: 'Obsidian Shards', crystal: 'Crystal Growth', iceshard: 'Ice Spire',
-  floater: 'Floating Rock', spire: 'Rock Spire', vent: 'Magma Vent',
-};
-
 // Owns everything that only exists near a planet's surface: flora/rock
 // scatter, points of interest, mining and the analysis visor.
 export class Surface {
@@ -64,6 +59,8 @@ export class Surface {
       return;
     }
     if (!this.scatter) return;
+    const ship = this.game.ship;
+    this.scatter.setClearing(ship.frame === planet && ship.state !== 'flying' ? ship.pos : null, 8);
     this.scatter.update(local, time);
     this.pois.update(local, time);
     if (this.fauna) this.fauna.update(Math.min(dt, 0.05), local, time, local);
@@ -118,7 +115,7 @@ export class Surface {
     const sp = target.hit.species;
     const res = RESOURCES[sp.res];
     const known = sp.plant && this.game.state.species[sp.id];
-    const name = sp.plant ? (known ? sp.name : 'Unknown flora') : KIND_LABEL[sp.kind] || 'Mineral';
+    const name = sp.plant ? (known ? sp.name : 'Unknown flora') : sp.label;
     return { name, sub: res ? `${res.name}` : '' };
   }
 
@@ -131,8 +128,12 @@ export class Surface {
     if (target.kind === 'poi') return this.pois.mine(target.hit.poi, dt, power);
     if (target.kind === 'fauna') return null;
     const h = target.hit;
-    if (!this.mining || this.mining.id !== h.id) this.mining = { id: h.id, progress: 0 };
     const sp = h.species;
+    if (this.game.isFull(sp.res)) {
+      this.mining = null;
+      return null;
+    }
+    if (!this.mining || this.mining.id !== h.id) this.mining = { id: h.id, progress: 0 };
     this.mining.progress += (dt * power) / (sp.mine * Math.max(0.6, Math.sqrt(h.scale)));
     if (this.mining.progress >= 1) {
       this.scatter.remove(h.id);

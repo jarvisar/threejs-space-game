@@ -1,15 +1,6 @@
 // Deterministic helpers. Everything procedural in the game is derived from
 // integer seeds through these so a galaxy seed always rebuilds the same universe.
 
-export function hashString(str) {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
 export function hashInt(x) {
   x = x | 0;
   x = Math.imul((x >>> 16) ^ x, 0x45d9f3b);
@@ -27,11 +18,6 @@ export function hash3(x, y, z, seed = 0) {
   h = hashInt(h ^ Math.imul(y | 0, 0xd8163841));
   h = hashInt(h ^ Math.imul(z | 0, 0xcb1ab31f));
   return h;
-}
-
-// 0..1 float from integer coords
-export function hash3f(x, y, z, seed = 0) {
-  return hash3(x, y, z, seed) / 4294967296;
 }
 
 export class RNG {

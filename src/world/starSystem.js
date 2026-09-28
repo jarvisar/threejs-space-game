@@ -23,7 +23,6 @@ export class StarSystem {
       scene.add(b.group);
       return b;
     });
-    this.rocky = this.bodies.filter((b) => b instanceof Planet);
     this.focus = null;
   }
 
@@ -66,20 +65,6 @@ export class StarSystem {
     return top;
   }
 
-  // body whose surface is closest to a world point
-  nearestBody(pos) {
-    let best = null;
-    let bestD = Infinity;
-    for (const b of this.bodies) {
-      const d = _v.subVectors(pos, b.position).length() - b.radius;
-      if (d < bestD) {
-        bestD = d;
-        best = b;
-      }
-    }
-    return { body: best, dist: bestD };
-  }
-
   // body whose rotating frame the player should live in, if any
   frameBodyFor(pos, current) {
     for (const b of this.bodies) {
@@ -99,6 +84,6 @@ export class StarSystem {
   }
 }
 
-export function soiRadius(b) {
+function soiRadius(b) {
   return Math.max(b.atmoRadius * 1.35, b.radius + 2500);
 }

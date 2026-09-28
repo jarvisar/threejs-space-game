@@ -1,5 +1,3 @@
-import { RNG } from '../core/rng.js';
-
 // Planet archetypes. Ranges are [min, max] and get rolled per planet.
 // Palette colors are sRGB hex. sky is the relative Rayleigh scattering per
 // channel, which sets the daytime sky tint (sunsets end up complementary).
@@ -210,7 +208,7 @@ export const GAS_PALETTES = [
   ['#e0e0e0', '#a0a0b0', '#f8f8f8', '#707080', '#ffffff'],
 ];
 
-function roll(rng, r) {
+export function roll(rng, r) {
   if (!Array.isArray(r)) return r;
   return rng.range(r[0], r[1]);
 }
@@ -296,5 +294,3 @@ export function buildTerrain(rng, type, radius, seed) {
   if (radius < 3000) t.craterScale *= Math.max(0.5, radius / 3000);
   return t;
 }
-
-export { roll, RNG };

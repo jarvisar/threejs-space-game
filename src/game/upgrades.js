@@ -104,6 +104,5 @@ export function stats(state) {
 export const RECIPES = [
   { id: 'warpcell', name: 'Warp Cell', desc: 'Fuel for one hyperspace jump.', cost: { hydrogel: 40, ferrite: 20 } },
   { id: 'shield', name: 'Shield Charge', desc: 'Refills hazard protection right away.', cost: { lumen: 15, carbon: 5 } },
-  { id: 'hull', name: 'Hull Patch', desc: 'Repairs ship hull damage.', cost: { ferrite: 30, carbon: 15 } },
   { id: 'lens', name: 'Harmonic Lens', desc: 'Focuses the Chorus Drive for the jump to the galactic core.', cost: { aetherium: 40, relic: 3, hydrogel: 60 }, story: true },
 ];

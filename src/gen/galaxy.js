@@ -18,6 +18,9 @@ export const CLASS_KEYS = Object.keys(STAR_CLASSES);
 
 export const GALAXY_RADIUS = 1050;
 
+// system index of the galactic core, reached by the Core Jump. It isn't in the star list.
+export const CORE_INDEX = -2;
+
 export class Galaxy {
   constructor(seed, count = 24000) {
     this.seed = seed >>> 0;
@@ -136,7 +139,7 @@ export class Galaxy {
   }
 
   info(i) {
-    if (i === -2) return { index: i, cls: 'X', ...STAR_CLASSES.X, label: 'Galactic Core', name: 'The Heart', seed: hashCombine(this.seed, 0xc0de) };
+    if (i === CORE_INDEX) return { index: i, cls: 'X', ...STAR_CLASSES.X, label: 'Galactic Core', name: 'The Heart', seed: hashCombine(this.seed, 0xc0de) };
     const cls = this.classOf(i);
     return { index: i, cls, ...STAR_CLASSES[cls], name: this.name(i), seed: this.starSeed(i) };
   }
@@ -198,6 +201,3 @@ export class Galaxy {
     return best;
   }
 }
-
-// index -2 is the galactic core, reached by the Core Jump
-export const CORE_INDEX = -2;

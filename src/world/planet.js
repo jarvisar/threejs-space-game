@@ -11,6 +11,8 @@ function chunkIndex() {
 }
 
 const _v = new THREE.Vector3();
+const _t1 = new THREE.Vector3();
+const _t2 = new THREE.Vector3();
 
 // Shared by rocky planets and gas giants. Scattering coefficients are picked
 // so the zenith optical depth of the strongest channel is about 0.4 * density,
@@ -44,6 +46,49 @@ export function fillAtmoCommon(body, s) {
   s.cloudCov = 0;
   s.camAlt = body.camDist - body.radius;
   s.solidR = body.radius * 0.995;
+}
+
+// Surface normal from three height samples around a local direction
+export function surfaceNormal(planet, dir, eps = 1.5) {
+  const t1 = _t1.set(0, 1, 0).cross(dir);
+  if (t1.lengthSq() < 1e-6) t1.set(1, 0, 0).cross(dir);
+  t1.normalize();
+  const t2 = _t2.copy(dir).cross(t1).normalize();
+  const R = planet.radius;
+  const a = eps / R;
+  const d0 = dir.clone();
+  const d1 = dir.clone().addScaledVector(t1, a).normalize();
+  const d2 = dir.clone().addScaledVector(t2, a).normalize();
+  const p0 = d0.multiplyScalar(R + planet.heightAt(dir));
+  const p1 = d1.multiplyScalar(R + planet.heightAt(d1));
+  const p2 = d2.multiplyScalar(R + planet.heightAt(d2));
+  const n = new THREE.Vector3().subVectors(p1, p0).cross(new THREE.Vector3().subVectors(p2, p0)).normalize();
+  if (n.dot(dir) < 0) n.negate();
+  return n;
+}
+
+// spiral search for a dry spot with some height near dir. Falls back to the
+// highest point it sampled so mostly-ocean worlds still get the best island.
+export function findLand(body, dir, minH = 4) {
+  let best = dir;
+  let bestH = body.heightAt(dir);
+  if (bestH > minH) return dir;
+  const t1 = new THREE.Vector3(0, 1, 0).cross(dir);
+  if (t1.lengthSq() < 1e-6) t1.set(1, 0, 0);
+  t1.normalize();
+  const t2 = dir.clone().cross(t1);
+  for (let i = 1; i < 1600; i++) {
+    const a = i * 2.399;
+    const r = 0.012 * Math.sqrt(i);
+    const d = dir.clone().addScaledVector(t1, Math.cos(a) * r).addScaledVector(t2, Math.sin(a) * r).normalize();
+    const h = body.heightAt(d);
+    if (h > minH) return d;
+    if (h > bestH) {
+      best = d;
+      bestH = h;
+    }
+  }
+  return best;
 }
 
 class Node {
@@ -125,10 +170,6 @@ export class Planet extends Body {
   // Surface height in meters at a planet-local direction, matching the finest mesh.
   heightAt(dir) {
     return this.gen.height(dir.x, dir.y, dir.z, this.finestLod);
-  }
-
-  sampleAt(dir, out) {
-    return this.gen.sample(dir.x, dir.y, dir.z, out, this.finestLod);
   }
 
   // Ground radius including oceans (liquid counts as a floor for the player)
@@ -221,13 +262,8 @@ export class Planet extends Body {
   }
 
   hideSubtree(node) {
-    let was = false;
-    if (node.mesh && node.mesh.visible) {
-      node.mesh.visible = false;
-      was = true;
-    }
-    if (node.children) for (const c of node.children) was = this.hideSubtree(c) || was;
-    return was;
+    if (node.mesh) node.mesh.visible = false;
+    if (node.children) for (const c of node.children) this.hideSubtree(c);
   }
 
   disposeSubtree(node) {

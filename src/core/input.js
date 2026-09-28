@@ -6,10 +6,7 @@ export class Input {
     this.canvas = canvas;
     this.down = new Set();
     this.pressed = new Set();
-    this.released = new Set();
     this.mouseDown = new Set();
-    this.mousePressed = new Set();
-    this.mouseReleased = new Set();
     this.dx = 0;
     this.dy = 0;
     this.wheel = 0;
@@ -19,14 +16,18 @@ export class Input {
     this.invertY = false;
 
     window.addEventListener('keydown', (e) => {
-      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-      if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+      const t = e.target;
+      const tag = t && t.tagName;
+      // typing in the seed box shouldn't move anything, but Esc still works
+      if (((tag === 'INPUT' && t.type === 'text') || tag === 'TEXTAREA') && e.code !== 'Escape') return;
+      // menu controls keep their keys: Tab moves focus, Space presses, arrows move sliders
+      const onControl = tag === 'BUTTON' || tag === 'INPUT';
+      if (!onControl && (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow'))) e.preventDefault();
       if (!this.down.has(e.code)) this.pressed.add(e.code);
       this.down.add(e.code);
     });
     window.addEventListener('keyup', (e) => {
       this.down.delete(e.code);
-      this.released.add(e.code);
     });
     window.addEventListener('blur', () => {
       this.down.clear();
@@ -39,11 +40,9 @@ export class Input {
     });
     canvas.addEventListener('mousedown', (e) => {
       this.mouseDown.add(e.button);
-      this.mousePressed.add(e.button);
     });
     window.addEventListener('mouseup', (e) => {
       this.mouseDown.delete(e.button);
-      this.mouseReleased.add(e.button);
     });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('wheel', (e) => {
@@ -79,10 +78,6 @@ export class Input {
     return this.enabled && this.mouseDown.has(b);
   }
 
-  click(b) {
-    return this.enabled && this.mousePressed.has(b);
-  }
-
   axis(neg, pos) {
     return (this.key(pos) ? 1 : 0) - (this.key(neg) ? 1 : 0);
   }
@@ -94,9 +89,6 @@ export class Input {
 
   endFrame() {
     this.pressed.clear();
-    this.released.clear();
-    this.mousePressed.clear();
-    this.mouseReleased.clear();
     this.dx = 0;
     this.dy = 0;
     this.wheel = 0;

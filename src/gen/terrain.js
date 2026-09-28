@@ -1,14 +1,10 @@
 import { createNoise3D, fbm, ridged } from '../core/noise.js';
 import { hash3 } from '../core/rng.js';
+import { smoothstep } from '../core/math.js';
 
 // Planet height function. Shared by the chunk workers and the main thread
 // (collision, scatter placement) so both always agree on where the ground is.
 // Heights are in meters relative to the planet's base radius (sea level).
-
-function smoothstep(a, b, x) {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-}
 
 export class TerrainGenerator {
   constructor(t) {
@@ -191,21 +187,24 @@ export function faceDir(face, u, v, out) {
   return out;
 }
 
-// Inverse of faceDir. Returns face index and fills uv (-1..1).
-export function dirToFace(x, y, z, uv) {
-  const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
-  let face, cu, cv;
-  if (ax >= ay && ax >= az) {
-    if (x > 0) { face = 0; cu = -z / ax; cv = y / ax; }
-    else { face = 1; cu = z / ax; cv = y / ax; }
-  } else if (ay >= az) {
-    if (y > 0) { face = 2; cu = x / ay; cv = -z / ay; }
-    else { face = 3; cu = x / ay; cv = z / ay; }
-  } else {
-    if (z > 0) { face = 4; cu = x / az; cv = y / az; }
-    else { face = 5; cu = -x / az; cv = y / az; }
-  }
-  uv[0] = Math.atan(cu) / QPI;
-  uv[1] = Math.atan(cv) / QPI;
-  return face;
+// Calls fn(face, x, y, dist) for every quadtree cell at `level` whose center is
+// within `radius` meters of the unit direction `dir`, measured along the surface.
+export function forEachCellNear(R, level, dir, radius, fn) {
+  const d = [0, 0, 0];
+  const walk = (face, l, x, y) => {
+    const size = 2 / (1 << l);
+    faceDir(face, -1 + (x + 0.5) * size, -1 + (y + 0.5) * size, d);
+    const dist = Math.acos(Math.max(-1, Math.min(1, d[0] * dir.x + d[1] * dir.y + d[2] * dir.z))) * R;
+    // a cell's corners reach about 0.75 of its width from the center
+    if (dist > radius + ((R * Math.PI) / 2 / (1 << l)) * 0.75) return;
+    if (l === level) {
+      fn(face, x, y, dist);
+      return;
+    }
+    walk(face, l + 1, x * 2, y * 2);
+    walk(face, l + 1, x * 2 + 1, y * 2);
+    walk(face, l + 1, x * 2, y * 2 + 1);
+    walk(face, l + 1, x * 2 + 1, y * 2 + 1);
+  };
+  for (let f = 0; f < 6; f++) walk(f, 0, 0, 0);
 }

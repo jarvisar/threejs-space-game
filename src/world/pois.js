@@ -1,22 +1,22 @@
 import * as THREE from 'three';
 import { RNG, hash3 } from '../core/rng.js';
-import { faceDir } from '../gen/terrain.js';
+import { faceDir, forEachCellNear } from '../gen/terrain.js';
 import { patchStandard } from '../render/materials.js';
 import { LAYER_POST } from '../render/pipeline.js';
 import { RESOURCES } from '../game/resources.js';
-import { surfaceNormal } from '../player/ship.js';
-import { findLand } from '../game/debugCam.js';
+import { surfaceNormal, findLand } from './planet.js';
 
 const _v = new THREE.Vector3();
 const Y = new THREE.Vector3(0, 1, 0);
 
+// verb is the E prompt, deposits are mined instead
 export const POI_INFO = {
-  monolith: { label: 'Echo Stone', color: '#c9a2ff' },
+  monolith: { label: 'Echo Stone', color: '#c9a2ff', verb: 'Listen to the Echo Stone' },
   deposit: { label: 'Deposit', color: '#7fe0ff' },
-  cache: { label: 'Supply Pod', color: '#ffb45e' },
-  ruin: { label: 'Chorus Ruins', color: '#ffe9b0' },
-  beacon: { label: 'Signal Beacon', color: '#7dffb0' },
-  spire: { label: 'Chorus Spire', color: '#ffe9b0' },
+  cache: { label: 'Supply Pod', color: '#ffb45e', verb: 'Open the supply pod' },
+  ruin: { label: 'Chorus Ruins', color: '#ffe9b0', verb: 'Take the shard' },
+  beacon: { label: 'Signal Beacon', color: '#7dffb0', verb: 'Link to the beacon' },
+  spire: { label: 'Chorus Spire', color: '#ffe9b0', verb: 'Touch the spire' },
 };
 
 const WEIGHTS = {
@@ -329,32 +329,13 @@ export class PoiManager {
     return out;
   }
 
-  cellsNear(local, radius) {
-    const R = this.planet.radius;
-    const dir = _v.copy(local).normalize();
-    const L = this.level;
-    const res = [];
-    const walk = (face, level, x, y) => {
-      const size = 2 / (1 << level);
-      const d = faceDir(face, -1 + (x + 0.5) * size, -1 + (y + 0.5) * size, [0, 0, 0]);
-      const ang = Math.acos(Math.max(-1, Math.min(1, d[0] * dir.x + d[1] * dir.y + d[2] * dir.z)));
-      if (ang * R > radius + ((R * Math.PI) / 2 / (1 << level)) * 0.75) return;
-      if (level === L) return res.push([face, x, y]);
-      walk(face, level + 1, x * 2, y * 2);
-      walk(face, level + 1, x * 2 + 1, y * 2);
-      walk(face, level + 1, x * 2, y * 2 + 1);
-      walk(face, level + 1, x * 2 + 1, y * 2 + 1);
-    };
-    for (let f = 0; f < 6; f++) walk(f, 0, 0, 0);
-    return res;
-  }
-
   update(local, time) {
-    this.time = time;
     if (!this.lastCellCheck || time - this.lastCellCheck > 1) {
       this.lastCellCheck = time;
+      const near = [];
+      forEachCellNear(this.planet.radius, this.level, _v.copy(local).normalize(), 4000, (f, x, y) => near.push([f, x, y]));
       const keep = new Set();
-      for (const [f, x, y] of this.cellsNear(local, 4000)) {
+      for (const [f, x, y] of near) {
         const k = `${f}:${x}:${y}`;
         keep.add(k);
         if (!this.cells.has(k)) this.cells.set(k, this.generateCell(f, x, y));
@@ -484,16 +465,15 @@ export class PoiManager {
   }
 
   mine(poi, dt, power) {
-    if (poi.type !== 'deposit') return null;
+    if (poi.type !== 'deposit' || this.game.isFull(poi.res)) return null;
     const rec = this.record.mined;
     poi.acc = (poi.acc || 0) + dt * power * 9;
-    let gained = 0;
-    while (poi.acc >= 1 && (rec[poi.id] || 0) < poi.amount) {
-      poi.acc -= 1;
-      rec[poi.id] = (rec[poi.id] || 0) + 1;
-      gained++;
+    const want = Math.min(Math.floor(poi.acc), poi.amount - (rec[poi.id] || 0));
+    if (want > 0) {
+      poi.acc -= want;
+      // with a full hold the rest stays in the ground
+      rec[poi.id] = (rec[poi.id] || 0) + this.game.gain(poi.res, want, true);
     }
-    if (gained) this.game.gain(poi.res, gained, true);
     const left = poi.amount - (rec[poi.id] || 0);
     if (left <= 0) {
       this.game.effects.burst(this.planet, poi.pos.clone().addScaledVector(poi.dir, 2), RESOURCES[poi.res].color, 4);

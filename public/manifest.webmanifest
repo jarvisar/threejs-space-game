@@ -1,0 +1,31 @@
+{
+  "name": "Starsong",
+  "short_name": "Starsong",
+  "description": "A free space exploration game for the browser. Land on procedural planets, fly between them without loading screens and warp across 24,000 star systems.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["games"],
+  "launch_handler": { "client_mode": "focus-existing" },
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "screenshots": [
+    { "src": "screenshots/surface.webp", "sizes": "1280x720", "type": "image/webp", "form_factor": "wide", "label": "Landed ship on a forest planet" },
+    { "src": "screenshots/orbit.webp", "sizes": "1280x720", "type": "image/webp", "form_factor": "wide", "label": "Planet horizon from low orbit" },
+    { "src": "screenshots/gas-giant.webp", "sizes": "1280x720", "type": "image/webp", "form_factor": "wide", "label": "Ringed gas giant" },
+    { "src": "screenshots/galaxy-map.webp", "sizes": "1280x720", "type": "image/webp", "form_factor": "wide", "label": "Galaxy map" }
+  ],
+  "shortcuts": [
+    { "name": "Continue", "description": "Load the last save", "url": "./?play=continue", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ]
+}

@@ -279,7 +279,6 @@ export function createTerrainMaterial(def, planetUniforms) {
       }
     `,
   });
-  mat.onBeforeCompileTerrainUniforms = uniforms;
   // roughness from the snow mask
   const prevCompile = mat.onBeforeCompile;
   mat.onBeforeCompile = (shader) => {

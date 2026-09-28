@@ -1,55 +1,24 @@
 import * as THREE from 'three';
+import { findLand } from '../world/planet.js';
 
-// spiral search for a dry spot with some height near dir. Falls back to the
-// highest point it sampled so mostly-ocean worlds still get the best island.
-export function findLand(body, dir, minH = 4) {
-  let best = dir;
-  let bestH = body.heightAt(dir);
-  if (bestH > minH) return dir;
-  const t1 = new THREE.Vector3(0, 1, 0).cross(dir);
-  if (t1.lengthSq() < 1e-6) t1.set(1, 0, 0);
-  t1.normalize();
-  const t2 = dir.clone().cross(t1);
-  for (let i = 1; i < 1600; i++) {
-    const a = i * 2.399;
-    const r = 0.012 * Math.sqrt(i);
-    const d = dir.clone().addScaledVector(t1, Math.cos(a) * r).addScaledVector(t2, Math.sin(a) * r).normalize();
-    const h = body.heightAt(d);
-    if (h > minH) return d;
-    if (h > bestH) {
-      best = d;
-      bestH = h;
-    }
-  }
-  return best;
-}
+const _q = new THREE.Quaternion();
+const _e = new THREE.Euler(0, 0, 0, 'YXZ');
+const Z = new THREE.Vector3(0, 0, 1);
 
-// Free-fly camera used for testing and photo mode.
+// Free-fly camera used for photo mode and by test scripts through window.__game.
 export class DebugCam {
-  constructor(game) {
-    this.game = game;
+  constructor() {
     this.pos = new THREE.Vector3();
     this.quat = new THREE.Quaternion();
     this.speed = 200;
-    this.keys = new Set();
-    window.addEventListener('keydown', (e) => this.keys.add(e.code));
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('wheel', (e) => {
-      if (!this.active) return;
-      this.speed *= e.deltaY > 0 ? 0.8 : 1.25;
-      this.speed = Math.min(Math.max(this.speed, 1), 500000);
-    });
-    window.addEventListener('mousemove', (e) => {
-      if (!this.active || document.pointerLockElement === null) return;
-      const q = new THREE.Quaternion();
-      q.setFromEuler(new THREE.Euler(-e.movementY * 0.002, -e.movementX * 0.002, 0, 'YXZ'));
-      this.quat.multiply(q);
-    });
-    this.active = false;
   }
 
-  update(dt) {
-    const k = this.keys;
+  // reads raw key state, the game pauses (and disables input) in photo mode
+  update(dt, input) {
+    const look = input.look();
+    if (look.x || look.y) this.quat.multiply(_q.setFromEuler(_e.set(-look.y, -look.x, 0)));
+    if (input.wheel) this.speed = Math.min(Math.max(this.speed * (input.wheel > 0 ? 0.8 : 1.25), 1), 500000);
+    const k = input.down;
     const v = new THREE.Vector3();
     if (k.has('KeyW')) v.z -= 1;
     if (k.has('KeyS')) v.z += 1;
@@ -60,8 +29,9 @@ export class DebugCam {
     let roll = 0;
     if (k.has('KeyQ')) roll += 1;
     if (k.has('KeyE')) roll -= 1;
-    if (roll) this.quat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), roll * dt));
-    v.applyQuaternion(this.quat).multiplyScalar(this.speed * dt * (k.has('ShiftLeft') ? 5 : 1));
+    if (roll) this.quat.multiply(_q.setFromAxisAngle(Z, roll * dt));
+    const fast = k.has('ShiftLeft') || k.has('ShiftRight');
+    v.applyQuaternion(this.quat).multiplyScalar(this.speed * dt * (fast ? 5 : 1));
     this.pos.add(v);
   }
 

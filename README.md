@@ -2,6 +2,8 @@
 
 A procedural space exploration game for the browser, built with Three.js. Land on planets, fly between them without loading screens, and follow a signal across a galaxy of 24,000 star systems toward its core.
 
+Visit [spacegame.ajarvis.co](https://spacegame.ajarvis.co) to play the latest deployment.
+
 ## Features
 
 - Planets are full-size spheres streamed in as a quadtree of terrain chunks generated in web workers. You can fly from orbit down to the grass without a loading screen.
@@ -10,40 +12,42 @@ A procedural space exploration game for the browser, built with Three.js. Land o
 - 10 planet types (lush, oceanic, arid, frozen, scorched, toxic, irradiated, barren, dead and exotic), each with its own palettes, terrain features, weather and hazards.
 - Procedural flora, rocks and crystals placed per planet, plus grazing herds, bird flocks and floating drifters. Some lush, oceanic and exotic worlds also have a huge leviathan circling overhead.
 - Mining, a scanner, points of interest (Echo Stones, ruins, supply pods, beacons, resource deposits), crafting and eight upgrade tracks.
+- A journal that keeps every world you've found and how much of its life you've catalogued.
 - Asteroid fields you can mine with the ship's lasers.
 - A galaxy map with warp jumps. Stars are gated by color, so better drives open up more of the galaxy.
 - A short story that leads from a crash landing to the galactic core.
 - All music and sound effects are synthesized in the browser with WebAudio. The music changes with the planet you're on.
 - Progress saves to localStorage automatically.
+- Can be installed as an app from Chrome or Edge. After the first load it also works offline.
 
 ## How to Play
 
-Click the view to capture the mouse. Press Esc at any time to pause and release it.
+Click the view to capture the mouse. Press `Esc` at any time to pause and release it.
 
 On foot:
 
-- Use WASD to move and the mouse to look. Hold Shift to sprint.
-- Press Space to jump and hold it in the air to use the jetpack.
-- Hold Left Mouse to mine rocks, plants and crystals.
-- Hold Right Mouse on a plant or creature to catalogue it.
-- Press F to send out a scanner pulse that marks nearby sites.
-- Press E to interact with sites or board your ship.
-- Press R to recharge your hazard shield with 10 Lumen.
+- Use `WASD` to move and the mouse to look. Hold `Shift` to sprint.
+- Press `Space` to jump and hold it in the air to use the jetpack.
+- Hold `Left Mouse` to mine rocks, plants and crystals.
+- Hold `Right Mouse` on a plant or creature to catalogue it.
+- Press `F` to send out a scanner pulse that marks nearby sites.
+- Press `E` to interact with sites or board your ship.
+- Press `R` to recharge your hazard shield with 10 Lumen.
 
 In the ship:
 
 - Steer with the mouse. The ship turns toward the reticle.
-- Use W/S for throttle and A/D to roll. Hold Shift to boost.
-- Press Space away from planets to engage the pulse drive. It slows down on its own as you approach a planet.
-- Press E near the ground to land, and E again to get out.
-- Hold Left Mouse to fire the mining lasers at asteroids.
-- Press F to scan the planet below.
+- Use `W`/`S` for throttle and `A`/`D` to roll. Hold `Shift` to boost.
+- Press `Space` away from planets to engage the pulse drive. It slows down on its own as you approach a planet.
+- Press `E` near the ground to land, and `E` again to get out.
+- Hold `Left Mouse` to fire the mining lasers at asteroids.
+- Press `F` to scan the planet below.
 
 Anywhere:
 
-- Tab opens cargo, crafting, upgrades and the journal.
-- G opens the galaxy map. Drag to rotate, scroll to zoom, press C to center on your star and T to find the signal.
-- P toggles photo mode, which hides the HUD and gives a free camera.
+- `Tab` opens cargo, crafting, upgrades and the journal. `J` goes straight to the journal.
+- `G` opens the galaxy map. Drag to rotate and scroll to zoom. Hover a star to see its name and distance, and click it to plot a jump. Press `C` to center on your star and `T` to find the signal.
+- `P` toggles photo mode, which hides the HUD and freezes the world. Fly the camera with `WASD`, `R`/`F` to go up and down, `Q`/`E` to roll and the wheel to change speed.
 
 ## Progression
 
@@ -64,7 +68,7 @@ Echo Stones and ruins are the main source of Relic Shards outside the spires. Sc
 
 ## Local Installation
 
-1. Install Node.js 18 or newer.
+1. Install Node.js 20.19 or newer (Vite 8 needs it).
 2. Clone the repository and open the folder in a terminal.
 3. Install dependencies.
 
@@ -80,7 +84,13 @@ Echo Stones and ruins are the main source of Relic Shards outside the spires. Sc
 
 5. Open http://localhost:5173 in Chrome.
 
-To make a static build, run `npm run build`. The output in `dist` uses relative paths, so it can be served from any folder, including GitHub Pages.
+To make a static build, run `npm run build`. The output in `dist` uses relative paths, so it can be served from any folder. The service worker is only added to production builds, so `npm run dev` never caches anything.
+
+## Deployment
+
+Pushing to `main` runs `.github/workflows/deploy.yml`, which builds the site and deploys `dist` to GitHub Pages. In the repo settings under Pages, the source has to be set to GitHub Actions and the custom domain to `spacegame.ajarvis.co`, with a CNAME record for `spacegame` pointing at `jarvisar.github.io`. Once GitHub has issued the certificate, turn on `Enforce HTTPS` too, since the service worker and the install button only work over HTTPS.
+
+Players who already loaded the game keep the cached version until they close all its tabs and open it again, or click `Restart to update` on the title screen.
 
 ## URL Options
 
@@ -88,6 +98,8 @@ To make a static build, run `npm run build`. The output in `dist` uses relative 
 - `?play=continue` skips the title screen and loads the save.
 - `?scale=0.75` renders at 75% resolution. Render scale is also in the pause menu.
 - `?msaa=0` turns off multisampling.
+
+For debugging, `?prof=1` keeps the worst time per section of the frame in `window.__game.prof`, and `?capture=1` keeps the drawing buffer around for screenshots.
 
 ## Known Issues & Limitations
 
@@ -97,6 +109,7 @@ To make a static build, run `npm run build`. The output in `dist` uses relative 
 - Terrain is a height field, so there are no caves or overhangs.
 - Only mouse and keyboard are supported. There is no touch or gamepad input.
 - Mined plants and rocks are remembered, but only the most recent 5000.
+- There is one save slot. Starting a new journey replaces it, and the title screen asks first.
 - The save is stored per browser. Clearing site data deletes it.
 
 ## Project Structure
@@ -108,6 +121,7 @@ To make a static build, run `npm run build`. The output in `dist` uses relative 
 - `src/game` has the main loop, story, upgrades and save state.
 - `src/ui` has the HUD, menus and galaxy map.
 - `src/audio` has the sound engine and generative music.
+- `src/core` has input, the seeded RNG, noise and a couple of math helpers the workers share.
 
 ## Credits
 

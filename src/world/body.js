@@ -46,14 +46,6 @@ export class Body {
     return out.copy(local).applyQuaternion(this.quat).add(this.position);
   }
 
-  dirToLocal(v, out = new THREE.Vector3()) {
-    return out.copy(v).applyQuaternion(this.invQuat);
-  }
-
-  dirToWorld(v, out = new THREE.Vector3()) {
-    return out.copy(v).applyQuaternion(this.quat);
-  }
-
   // velocity of a planet-fixed point, needed when switching frames
   frameVelocity(local, out = new THREE.Vector3()) {
     // omega x r in the local frame is spin around local Y

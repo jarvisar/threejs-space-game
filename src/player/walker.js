@@ -24,7 +24,6 @@ export class Walker {
     this.jetFuel = 1;
     this.jetting = false;
     this.airTime = 0;
-    this.stamina = 1;
     this.bobPhase = 0;
     this.bob = 0;
     this.moving = 0;
@@ -81,12 +80,9 @@ export class Walker {
     const s = input.axis('KeyA', 'KeyD');
     const wish = new THREE.Vector3().addScaledVector(this.heading, f).addScaledVector(_right, s);
     if (wish.lengthSq() > 1) wish.normalize();
-    const sprinting = (input.key('ShiftLeft') || input.key('ShiftRight')) && f > 0 && this.stamina > 0.05 && !this.swimming;
+    const sprinting = (input.key('ShiftLeft') || input.key('ShiftRight')) && f > 0 && !this.swimming;
     const st = this.stats;
-    let speed = this.swimming ? 3.2 : sprinting ? st.sprint : st.walk;
-    speed *= ctx.speedScale || 1;
-    if (sprinting && this.moving > 0.1) this.stamina = Math.max(0, this.stamina - dt * 0.12);
-    else this.stamina = Math.min(1, this.stamina + dt * 0.2);
+    const speed = this.swimming ? 3.2 : sprinting ? st.sprint : st.walk;
 
     let vr = this.vel.dot(up);
     const vt = this.vel.clone().addScaledVector(up, -vr);

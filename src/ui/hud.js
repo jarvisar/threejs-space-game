@@ -1,20 +1,10 @@
+import { el, setText } from './dom.js';
+
 // DOM overlay for everything shown during play. The game pushes plain values
 // in each frame and this only touches the DOM when something changed.
 
-function el(tag, cls, parent, html) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (html !== undefined) e.innerHTML = html;
-  if (parent) parent.appendChild(e);
-  return e;
-}
-
-function setText(e, t) {
-  if (e._t !== t) {
-    e._t = t;
-    e.textContent = t;
-  }
-}
+// matches the banner animation in style.css
+const BANNER_MS = 4000;
 
 function fmtDist(m) {
   if (m < 1000) return `${Math.round(m)} m`;
@@ -49,6 +39,10 @@ export class HUD {
     this.nose = el('div', 'nose', this.root);
     this.scanRing = el('div', 'scan-ring', this.center);
     this.target = el('div', 'target-info', this.root);
+    this.targetName = el('div', 'ti-name', this.target);
+    this.targetSub = el('div', 'ti-sub', this.target);
+    this.targetBar = el('div', 'bar ti-bar', this.target);
+    this.targetFill = el('div', 'bar-fill', this.targetBar);
 
     this.promptEl = el('div', 'prompt', this.root);
     this.bannerEl = el('div', 'banner', this.root);
@@ -88,11 +82,26 @@ export class HUD {
     this.feed = el('div', 'feed', this.root);
     this.hint = el('div', 'hint', this.root);
     this.vignette = el('div', 'hazard-vignette', this.root);
+    // outside the HUD root, which photo mode hides
+    const keys = [['WASD', 'Fly'], ['R</kbd><kbd>F', 'Up, down'], ['Q</kbd><kbd>E', 'Roll'], ['Shift', 'Fast'], ['Wheel', 'Speed'], ['P', 'Exit']];
+    this.photoHint = el('div', 'photo-hint', root, `<b>Photo mode</b>${keys.map(([k, d]) => `<span><kbd>${k}</kbd>${d}</span>`).join('')}`);
     this.mode = null;
+    this.visible = true;
+    this.bannerQueue = [];
+    this.bannerOn = false;
   }
 
   setVisible(v) {
+    this.visible = v;
     this.root.style.display = v ? '' : 'none';
+    if (v && !this.bannerOn) this.nextBanner();
+  }
+
+  // fades out on its own so it isn't in the screenshots
+  showPhotoHint(v) {
+    clearTimeout(this._photoT);
+    this.photoHint.classList.toggle('show', v);
+    if (v) this._photoT = setTimeout(() => this.photoHint.classList.remove('show'), 6000);
   }
 
   setMode(mode) {
@@ -155,18 +164,13 @@ export class HUD {
   }
 
   setTarget(info) {
-    if (!info) {
-      this.target.classList.remove('show');
-      return;
-    }
-    this.target.classList.add('show');
-    const html = `<div class="ti-name">${info.name}</div><div class="ti-sub">${info.sub || ''}</div>${
-      info.progress !== undefined ? `<div class="bar ti-bar"><div class="bar-fill" style="width:${info.progress * 100}%"></div></div>` : ''
-    }`;
-    if (this.target._h !== html) {
-      this.target._h = html;
-      this.target.innerHTML = html;
-    }
+    this.target.classList.toggle('show', !!info);
+    if (!info) return;
+    setText(this.targetName, info.name);
+    setText(this.targetSub, info.sub || '');
+    const bar = info.progress !== undefined;
+    this.targetBar.style.display = bar ? '' : 'none';
+    if (bar) this.targetFill.style.width = `${info.progress * 100}%`;
   }
 
   notify(text, color = '#cfe8ff') {
@@ -179,14 +183,35 @@ export class HUD {
     while (this.feed.children.length > 6) this.feed.firstChild.remove();
   }
 
-  banner(title, sub, dur = 4000) {
-    setText(this.bannerTitle, title);
-    setText(this.bannerSub, sub || '');
+  // Banners queue so the planet banner doesn't replace the system name a frame
+  // later. They wait while the HUD is hidden, a hidden element restarts its
+  // animation when shown again.
+  banner(title, sub) {
+    if (this.bannerQueue.some((b) => b.title === title)) return;
+    this.bannerQueue.push({ title, sub });
+    if (!this.bannerOn) this.nextBanner();
+  }
+
+  nextBanner() {
+    const b = this.visible ? this.bannerQueue.shift() : null;
+    this.bannerOn = !!b;
+    if (!b) return;
+    setText(this.bannerTitle, b.title);
+    setText(this.bannerSub, b.sub || '');
     this.bannerEl.classList.remove('show');
     void this.bannerEl.offsetWidth;
     this.bannerEl.classList.add('show');
+    this._bannerT = setTimeout(() => {
+      this.bannerEl.classList.remove('show');
+      this.nextBanner();
+    }, BANNER_MS);
+  }
+
+  clearBanners() {
     clearTimeout(this._bannerT);
-    this._bannerT = setTimeout(() => this.bannerEl.classList.remove('show'), dur);
+    this.bannerQueue.length = 0;
+    this.bannerOn = false;
+    this.bannerEl.classList.remove('show');
   }
 
   clearMessage() {
@@ -208,11 +233,16 @@ export class HUD {
       seen.add(m.id);
       let e = this.markerEls.get(m.id);
       if (!e) {
-        e = el('div', `marker ${m.kind || ''}`, this.markerLayer);
+        e = el('div', 'marker', this.markerLayer);
         e.icon = el('div', 'marker-icon', e);
         e.label = el('div', 'marker-label', e);
         e.sub = el('div', 'marker-sub', e);
         this.markerEls.set(m.id, e);
+      }
+      // a planet marker turns into the signal marker when its spire becomes the goal
+      if (e._k !== m.kind) {
+        e._k = m.kind;
+        e.className = `marker ${m.kind || ''}`;
       }
       if (!m.visible) {
         e.style.display = 'none';

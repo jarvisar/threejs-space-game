@@ -141,10 +141,6 @@ export class AsteroidField {
     return hit;
   }
 
-  worldPos(rock, out = new THREE.Vector3()) {
-    return out.copy(rock.pos).add(this.position);
-  }
-
   dispose() {
     for (const m of this.meshes) {
       m.geometry.dispose();

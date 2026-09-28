@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { LAYER_POST } from '../render/pipeline.js';
+import { radialTexture } from '../render/textures.js';
 
 const COUNT = 2600;
 const BOX = 26;
@@ -14,18 +15,7 @@ const TYPES = {
 
 let tex = null;
 function dot() {
-  if (tex) return tex;
-  const s = 32;
-  const c = document.createElement('canvas');
-  c.width = c.height = s;
-  const g = c.getContext('2d');
-  const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-  grd.addColorStop(0, 'rgba(255,255,255,1)');
-  grd.addColorStop(0.4, 'rgba(255,255,255,0.5)');
-  grd.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grd;
-  g.fillRect(0, 0, s, s);
-  tex = new THREE.CanvasTexture(c);
+  if (!tex) tex = radialTexture(32, [[0, 'rgba(255,255,255,1)'], [0.4, 'rgba(255,255,255,0.5)'], [1, 'rgba(255,255,255,0)']]);
   return tex;
 }
 

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { patchStandard } from '../render/materials.js';
 import { LAYER_POST } from '../render/pipeline.js';
+import { radialTexture } from '../render/textures.js';
 
 // First person multitool. It hangs off the camera on the post layer and
 // squashes its depth so it always draws in front of the world.
@@ -119,7 +120,7 @@ export class Multitool {
     this.beam.visible = false;
     camera.add(this.beam);
 
-    const flashTex = makeFlashTexture();
+    const flashTex = radialTexture(64, [[0, 'rgba(255,255,255,1)'], [0.2, 'rgba(255,255,255,0.6)'], [1, 'rgba(255,255,255,0)']]);
     this.impact = new THREE.Sprite(new THREE.SpriteMaterial({ map: flashTex, color: new THREE.Color(4, 1.8, 0.8), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
     this.impact.visible = false;
     this.impact.frustumCulled = false;
@@ -179,18 +180,4 @@ export class Multitool {
       this.impact.visible = false;
     }
   }
-}
-
-function makeFlashTexture() {
-  const s = 64;
-  const c = document.createElement('canvas');
-  c.width = c.height = s;
-  const g = c.getContext('2d');
-  const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-  grd.addColorStop(0, 'rgba(255,255,255,1)');
-  grd.addColorStop(0.2, 'rgba(255,255,255,0.6)');
-  grd.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grd;
-  g.fillRect(0, 0, s, s);
-  return new THREE.CanvasTexture(c);
 }

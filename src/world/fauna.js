@@ -15,6 +15,8 @@ const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3();
 
+const LABELS = { grazer: 'Grazer', flyer: 'Flyer', floater: 'Drifter', leviathan: 'Leviathan' };
+
 const FAUNA_TYPES = {
   lush: [['grazer', 3], ['flyer', 2], ['floater', 1]],
   ocean: [['flyer', 3], ['grazer', 2], ['floater', 1]],
@@ -42,6 +44,7 @@ export function faunaSpecies(def) {
     out.push({
       id: `${def.id}:fauna:${i}`,
       kind,
+      label: LABELS[kind],
       seed,
       name: speciesName(seed ^ 0x999),
       plant: false,
@@ -68,6 +71,7 @@ export function faunaSpecies(def) {
     out.push({
       id: `${def.id}:fauna:leviathan`,
       kind: 'leviathan',
+      label: LABELS.leviathan,
       seed,
       name: speciesName(seed ^ 0x777),
       plant: false,
@@ -110,7 +114,6 @@ function blob(r, sx, sy, sz, detail = 1) {
 // Part ids: 0 body, 1..6 legs (extra = hip height), 10 wing (extra = side),
 // 20 tentacle (extra = phase), 30 glow
 function buildGrazer(sp) {
-  const rng = new RNG(sp.seed);
   const parts = [];
   const L = sp.legLen;
   const bodyY = L + 0.35;

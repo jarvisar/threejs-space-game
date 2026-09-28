@@ -25,9 +25,7 @@ export class GameState {
     this.pois = {};
     this.story = { stage: 'repair', resonance: 0, flags: {} };
     this.suit = { shield: 1, health: 1 };
-    this.ship = { hull: 1, repaired: false };
     this.player = null;
-    this.names = {};
   }
 
   count(res) {
@@ -66,10 +64,6 @@ export class GameState {
     return true;
   }
 
-  level(id) {
-    return this.upgrades[id] || 0;
-  }
-
   markVisited(i) {
     if (!this.visited.includes(i)) {
       this.visited.push(i);
@@ -84,14 +78,6 @@ export class GameState {
       return true;
     } catch (e) {
       console.warn('save failed', e);
-      return false;
-    }
-  }
-
-  static hasSave() {
-    try {
-      return !!localStorage.getItem(SAVE_KEY);
-    } catch {
       return false;
     }
   }

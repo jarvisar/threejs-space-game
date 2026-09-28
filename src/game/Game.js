@@ -6,16 +6,18 @@ import { WarpTunnel } from '../render/warp.js';
 import { SpaceDust } from '../render/spaceDust.js';
 import { AsteroidField } from '../world/asteroids.js';
 import { buildWarmup, disposeWarmup } from '../render/warmup.js';
-import { Galaxy, STAR_CLASSES } from '../gen/galaxy.js';
+import { Galaxy, STAR_CLASSES, CORE_INDEX } from '../gen/galaxy.js';
 import { generateSystem, generateCoreSystem } from '../gen/system.js';
 import { StarSystem } from '../world/starSystem.js';
-import { Planet } from '../world/planet.js';
+import { Planet, findLand, surfaceNormal } from '../world/planet.js';
 import { Sky } from '../world/sky.js';
 import { Weather } from '../world/weather.js';
 import { WorkerPool } from '../world/workerPool.js';
 import { POI_INFO } from '../world/pois.js';
+import { faunaSpecies } from '../world/fauna.js';
+import { planetSpecies } from '../gen/flora.js';
 import { Input } from '../core/input.js';
-import { Ship, surfaceNormal } from '../player/ship.js';
+import { Ship } from '../player/ship.js';
 import { Walker } from '../player/walker.js';
 import { CameraRig } from '../player/cameraRig.js';
 import { Multitool } from '../player/multitool.js';
@@ -29,8 +31,9 @@ import { Story } from './story.js';
 import { stats, level, UPGRADES, RECIPES } from './upgrades.js';
 import { RESOURCES } from './resources.js';
 import { RESONANCES, ENDING, echoText } from './lore.js';
-import { DebugCam, findLand } from './debugCam.js';
+import { DebugCam } from './debugCam.js';
 import { RNG } from '../core/rng.js';
+import { smoothstep } from '../core/math.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -102,7 +105,7 @@ export class Game {
     this.menus = new Menus(uiRoot, this);
     this.map = new GalaxyMap(this, uiRoot);
     this.rig = new CameraRig();
-    this.debugCam = new DebugCam(this);
+    this.debugCam = new DebugCam();
     this.audio = new AudioEngine();
     this.effects = new Effects();
     this.surface = new Surface(this);
@@ -133,7 +136,9 @@ export class Game {
         this.hud.clearMessage();
       }
       // Esc releases pointer lock without a keydown, treat that as pause
-      if (!locked && this.screen === 'play' && !this.menuOpen && !this.warp && !this.photo && !this.awaitLock) this.openMenu('pause');
+      if (locked || this.screen !== 'play' || this.menuOpen || this.warp || this.awaitLock) return;
+      if (this.photo) this.exitPhoto();
+      this.openMenu('pause');
     });
     window.addEventListener('beforeunload', () => {
       if (this.screen === 'play' && !this.warp) this.saveGame();
@@ -198,10 +203,11 @@ export class Game {
     this.loadSystem(idx);
     this.screen = 'title';
     this.paused = true;
+    this.hud.clearBanners();
     this.hud.setVisible(false);
     this.tool.setVisible(false);
     this.titleBody = this.system.bodies.find((b) => b.def.rings) || this.system.bodies[0];
-    this.menus.showTitle(!!saved);
+    this.menus.showTitle(saved ? { system: this.systemDef.name, playTime: saved.playTime } : null);
     this.menus.syncSettings(this.settings);
     this.menuOpen = 'title';
   }
@@ -298,7 +304,7 @@ export class Game {
     this.weather.setPlanet(null);
     if (this.system) this.system.dispose();
     this.state.systemIndex = index;
-    this.systemDef = index === -2 ? generateCoreSystem(this.galaxy) : generateSystem(this.galaxy, index, this.galaxy.story);
+    this.systemDef = index === CORE_INDEX ? generateCoreSystem(this.galaxy) : generateSystem(this.galaxy, index, this.galaxy.story);
     this.system = new StarSystem(this.systemDef, this.pool, this.scene);
     this.system.updateRotations(this.state.worldTime);
     this.sky.setSystem(index);
@@ -538,12 +544,7 @@ export class Game {
 
   gain(res, n, quiet) {
     const added = this.state.add(res, n);
-    if (added < n) {
-      if (!this._fullWarn || this.time - this._fullWarn > 3) {
-        this.hud.message(`${RESOURCES[res].name} storage full`);
-        this._fullWarn = this.time;
-      }
-    }
+    if (added < n) this.warnFull(res);
     if (added <= 0) return 0;
     this.gainBuffer.set(res, (this.gainBuffer.get(res) || 0) + added);
     if (!quiet) this.flushGains();
@@ -551,10 +552,23 @@ export class Game {
     return added;
   }
 
+  // mining checks this first so nothing gets destroyed for an empty reward
+  isFull(res) {
+    if (this.state.count(res) < this.state.cap(res)) return false;
+    this.warnFull(res);
+    return true;
+  }
+
+  warnFull(res) {
+    if (this.time - (this.fullWarnAt ?? -Infinity) < 3) return;
+    this.fullWarnAt = this.time;
+    this.hud.message(`${RESOURCES[res].name} storage full`);
+  }
+
   flushGains() {
     for (const [res, n] of this.gainBuffer) {
       const r = RESOURCES[res];
-      this.hud.notify(`+${n} <span class="res">${r.name}</span>`, r.color);
+      this.hud.notify(`+${n} <span class="hl">${r.name}</span>`, r.color);
     }
     this.gainBuffer.clear();
   }
@@ -569,7 +583,6 @@ export class Game {
     if (!r || (id === 'lens' && this.state.story.flags.lens) || !this.state.spend(r.cost)) return this.audio.error();
     if (id === 'warpcell') this.state.warpCells++;
     if (id === 'shield') this.state.suit.shield = 1;
-    if (id === 'hull') this.ship.hull = 1;
     if (id === 'lens') this.state.story.flags.lens = true;
     this.audio.craft();
     this.hud.notify(`Crafted ${r.name}`, '#ffb45e');
@@ -600,9 +613,11 @@ export class Game {
   }
 
   discoverSpecies(sp, planet) {
-    this.state.species[sp.id] = { name: sp.name, planet: planet.def.name, kind: sp.kind };
+    this.state.species[sp.id] = { name: sp.name, label: sp.label, planet: planet.def.name };
+    const world = this.state.discoveries[planet.def.id];
+    if (world) world.found = (world.found || 0) + 1;
     this.audio.discovery();
-    this.hud.notify(`Catalogued <span class="res">${sp.name}</span>`, '#7dffb0');
+    this.hud.notify(`Catalogued <span class="hl">${sp.name}</span>`, '#7dffb0');
     this.addData(sp.fauna ? 30 : 12 + Math.floor(Math.random() * 10), sp.fauna ? 'New creature' : 'New species');
     const all = planet.species.filter((s) => s.plant).concat(planet.faunaSpecies || []);
     const known = all.filter((s) => this.state.species[s.id]).length;
@@ -613,10 +628,12 @@ export class Game {
   }
 
   discoverBody(body) {
-    const id = body.def.id;
-    if (this.state.discoveries[id]) return;
-    this.state.discoveries[id] = { name: body.def.name, type: body.def.typeLabel, system: this.systemDef.name };
-    this.hud.banner(body.def.name, `${body.def.typeLabel}${body.def.isMoon ? ' moon' : ''} discovered`);
+    const d = body.def;
+    if (this.state.discoveries[d.id]) return;
+    // how many plants and creatures there are to catalogue, for the journal
+    const life = d.kind === 'rocky' ? planetSpecies(d).filter((s) => s.plant).length + faunaSpecies(d).length : 0;
+    this.state.discoveries[d.id] = { name: d.name, type: d.typeLabel, system: this.systemDef.name, life, found: 0 };
+    this.hud.banner(d.name, `${d.typeLabel}${d.isMoon ? ' moon' : ''} discovered`);
     this.addData(15, 'New world');
     this.audio.discovery();
   }
@@ -682,7 +699,7 @@ export class Game {
       const b = this.titleBody;
       this.rig.orbitBody(b, dt, this.time, b.radius * 3.4 + (b.rings ? b.radius * 1.5 : 0), b.radius * 0.9);
     } else if (this.photo) {
-      this.debugCam.update(dt);
+      this.debugCam.update(dt, input);
       this.rig.frame = null;
       this.rig.worldPos.copy(this.debugCam.pos);
       this.rig.worldQuat.copy(this.debugCam.quat);
@@ -712,9 +729,9 @@ export class Game {
     this.ship.updateModel(camWorld);
     this.effects.update(dt);
     const inSpace = this.screen === 'play' && this.mode === 'ship' && !this.photo;
-    const dustAmt = inSpace ? 1 - (this.ship.inAtmo || 0) : 0;
-    const wv = this.ship.frame ? this.ship.vel.clone().applyQuaternion(this.ship.frame.quat) : this.ship.vel;
-    this.dust.update(camWorld, this.warp ? wv.clone().multiplyScalar(0) : wv, this.warp ? 0 : dustAmt);
+    const dustAmt = inSpace && !this.warp ? 1 - (this.ship.inAtmo || 0) : 0;
+    const wv = this.ship.frame ? _v.copy(this.ship.vel).applyQuaternion(this.ship.frame.quat) : this.ship.vel;
+    this.dust.update(camWorld, wv, dustAmt);
     this.weather.update(dt, this.surface.planet, this.rig.frame === this.surface.planet ? this.rig.localPos : null, this.stormK || 0);
 
     this.camera.position.set(0, 0, 0);
@@ -727,7 +744,7 @@ export class Game {
     this.camera.updateMatrixWorld();
 
     this.profMark('misc');
-    this.updateLighting(camWorld);
+    this.updateLighting(camWorld, dt);
     if (this.screen === 'play') this.updateHud(dt);
     this.audio.update(this.audioParams(dt));
     this.updateMood();
@@ -756,7 +773,13 @@ export class Game {
     const k = this.input.pressed;
     if (this.screen !== 'play' || this.menuOpen === 'death') return;
     if (this.photo) {
-      if (k.has('KeyP') || k.has('Escape')) this.togglePhoto();
+      if (k.has('KeyP')) {
+        this.exitPhoto();
+        this.resume();
+      } else if (k.has('Escape')) {
+        this.exitPhoto();
+        this.openMenu('pause');
+      }
       return;
     }
     if (this.warp) return;
@@ -777,32 +800,33 @@ export class Game {
       if (this.menuOpen === 'map') this.closeMenus();
       else if (!this.menuOpen) this.openMenu('map');
     }
-    if (k.has('KeyP') && !this.menuOpen) this.togglePhoto();
+    if (k.has('KeyP') && !this.menuOpen) this.enterPhoto();
     if (this.menuOpen === 'inventory' && this.frame % 10 === 0) this.menus.render();
   }
 
-  togglePhoto() {
-    this.photo = !this.photo;
-    if (this.photo) {
-      this.debugCam.pos.copy(this.rig.worldPos);
-      this.debugCam.quat.copy(this.rig.worldQuat);
-      this.debugCam.speed = 12;
-      this.debugCam.active = true;
-      this.paused = true;
-      this.hud.setVisible(false);
-      this.tool.setVisible(false);
-      this.hud.message('');
-      this.input.lock();
-    } else {
-      this.debugCam.active = false;
-      this.paused = false;
-      this.hud.setVisible(true);
-      this.tool.setVisible(this.mode === 'foot');
-      this.rig.transition = null;
-    }
+  // the world holds still while the free camera flies around
+  enterPhoto() {
+    this.photo = true;
+    this.debugCam.pos.copy(this.rig.worldPos);
+    this.debugCam.quat.copy(this.rig.worldQuat);
+    this.debugCam.speed = 12;
+    this.paused = true;
+    this.hud.clearMessage();
+    this.hud.setVisible(false);
+    this.hud.showPhotoHint(true);
+    this.tool.setVisible(false);
+    this.input.lock();
   }
 
-  updateLighting(camWorld) {
+  exitPhoto() {
+    this.photo = false;
+    this.hud.setVisible(true);
+    this.hud.showPhotoHint(false);
+    this.tool.setVisible(this.mode === 'foot');
+    this.rig.transition = null;
+  }
+
+  updateLighting(camWorld, dt) {
     env.uSunPos.value.copy(camWorld).negate();
     const sunDir = _v.copy(env.uSunPos.value).normalize();
     const focus = this.system.focus;
@@ -825,7 +849,7 @@ export class Game {
       if (focus.uniforms && focus.uniforms.sky) {
         const alt = focus.camDist - focus.radius;
         const atmoH = focus.atmoRadius - focus.radius;
-        const k = 1 - smooth(atmoH, atmoH * 3, alt);
+        const k = 1 - smoothstep(atmoH, atmoH * 3, alt);
         // a little starlight fill in space so the ship never goes pitch black
         env.uEnvSky.value.setRGB(0.05, 0.055, 0.07).lerp(focus.uniforms.sky.value, k);
         env.uEnvGround.value.setRGB(0.02, 0.02, 0.025).lerp(focus.uniforms.ground.value, k);
@@ -835,17 +859,16 @@ export class Game {
       }
     }
     env.uWind.value = 0.4 + (this.stormK || 0) * 1.6;
-    this.updateLamp();
+    this.updateLamp(dt);
   }
 
-  updateLamp() {
-    const dt = 1 / 60;
+  updateLamp(dt) {
     let dark = 0;
     const frame = this.mode === 'foot' ? this.walker.frame : this.ship.frame;
     const local = this.mode === 'foot' ? this.walker.pos : this.ship.pos;
     if (this.screen === 'play' && frame instanceof Planet && local.length() - frame.radius < 1500) {
       const sunUp = frame.sunDirLocal(_v).dot(_v2.copy(local).normalize());
-      dark = 1 - smooth(-0.1, 0.12, sunUp);
+      dark = 1 - smoothstep(-0.1, 0.12, sunUp);
     }
     this.lampK += (dark - this.lampK) * Math.min(1, dt * 1.5);
     const lamp = this.lamp;
@@ -1034,6 +1057,7 @@ export class Game {
   }
 
   mineAsteroid(field, rock, dt) {
+    if (this.isFull(rock.type.res)) return;
     rock.hp -= (dt * this.stats.miningPower * 22) / rock.scale;
     if (rock.hp > 0) return;
     rock.alive = false;
@@ -1103,12 +1127,12 @@ export class Game {
       const cost = this.story.repairCost;
       if (this.state.has(cost)) {
         this.state.spend(cost);
-        this.state.ship.repaired = true;
         this.story.set('launch');
         this.hud.banner('Thrusters repaired', 'Ready for launch');
         this.audio.craft();
       } else {
-        this.hud.message('Launch thrusters need 40 Ferrite and 25 Carbon');
+        const parts = Object.entries(cost).map(([k, n]) => `${n} ${RESOURCES[k].name}`);
+        this.hud.message(`Launch thrusters need ${parts.join(' and ')}`);
       }
     }
     this.rig.orbitYaw = 0;
@@ -1178,7 +1202,7 @@ export class Game {
       const a = this.surface.analyze(target, dt);
       if (a && a.fresh) this.audio.discovery();
       if (a && !a.known) info = { name: 'Analyzing...', sub: a.species.fauna ? 'Unknown creature' : 'Unknown flora', progress: a.progress };
-      else if (a && a.known) info = { name: a.species.name, sub: a.species.fauna ? kindLabel(a.species.kind) : `${kindLabel(a.species.kind)} · ${RESOURCES[a.species.res].name}` };
+      else if (a && a.known) info = { name: a.species.name, sub: a.species.fauna ? a.species.label : `${a.species.label} · ${RESOURCES[a.species.res].name}` };
     } else if (progress !== null && info) info.progress = progress;
     this.targetInfo = info;
 
@@ -1345,7 +1369,7 @@ export class Game {
     planet.stormK = storm;
 
     const sunUp = planet.sunDirLocal(_v).dot(this.walker.up(_v2));
-    const day = smooth(-0.15, 0.3, sunUp);
+    const day = smoothstep(-0.15, 0.3, sunUp);
     let k = 0;
     if (hz.type === 'heat') k = hz.level * (0.55 + 0.9 * day);
     else if (hz.type === 'cold') k = hz.level * (0.55 + 0.9 * (1 - day));
@@ -1394,32 +1418,33 @@ export class Game {
 
   updateDiscovery() {
     const f = this.mode === 'foot' ? this.walker.frame : this.ship.frame;
-    if (!f || f.def.kind !== 'rocky') return;
+    if (!f) return;
+    // gas giants count once the ship is in their space, rocky worlds once inside the air
+    if (f.def.kind === 'gas') return this.discoverBody(f);
     const local = this.mode === 'foot' ? this.walker.pos : this.ship.pos;
-    const alt = local.length() - f.radius;
-    if (alt < (f.atmoRadius - f.radius) * 0.9) this.discoverBody(f);
+    if (local.length() - f.radius < (f.atmoRadius - f.radius) * 0.9) this.discoverBody(f);
   }
 
   // ---------------------------------------------------------------- warp
 
+  // why the ship can't jump from where it is right now, or null
+  warpBlocker() {
+    if (this.mode !== 'ship' || this.ship.state !== 'flying') return 'Take off before warping.';
+    if (this.ship.frame && this.ship.inAtmo > 0.1) return 'Leave the atmosphere before warping.';
+    return null;
+  }
+
+  // the map disables the button for all of these, this is the last check
   requestWarp(star) {
     const st = this.state;
     const s = stats(st);
-    const info = this.galaxy.info(star);
-    const dist = this.galaxy.dist(st.systemIndex, star);
-    let err = null;
-    if (st.warpCells < 1) err = 'No Warp Cells';
-    else if (dist > s.warpRange) err = 'Out of range';
-    else if (!s.warpClasses.includes(info.cls)) err = 'Drive cannot hold that star';
-    else if (this.mode !== 'ship' || this.ship.state !== 'flying') err = 'Take off before warping';
-    else if (this.ship.frame && this.ship.inAtmo > 0.1) err = 'Leave the atmosphere before warping';
+    let err = this.warpBlocker();
+    if (st.warpCells < 1) err = 'No Warp Cells.';
+    else if (this.galaxy.dist(st.systemIndex, star) > s.warpRange) err = 'Out of range.';
+    else if (!s.warpClasses.includes(this.galaxy.classOf(star))) err = 'Your drive cannot hold that star yet.';
     if (err) {
       this.audio.error();
-      this.map.info.querySelector('.gi-why')?.remove();
-      const e = document.createElement('div');
-      e.className = 'gi-why';
-      e.textContent = err;
-      this.map.info.prepend(e);
+      this.map.renderInfo(err);
       return;
     }
     st.warpCells--;
@@ -1429,14 +1454,15 @@ export class Game {
 
   requestCoreJump() {
     const st = this.state;
-    if (!st.story.flags.lens || st.warpCells < 1 || st.systemIndex === -2) return this.audio.error();
-    if (this.mode !== 'ship' || this.ship.state !== 'flying' || (this.ship.frame && this.ship.inAtmo > 0.1)) {
+    const err = this.warpBlocker();
+    if (!st.story.flags.lens || st.warpCells < 1 || st.systemIndex === CORE_INDEX || err) {
       this.audio.error();
-      return this.hud.message('Take off and leave the atmosphere first');
+      if (err) this.map.renderInfo(err);
+      return;
     }
     st.warpCells--;
     this.closeMenus();
-    this.beginWarp(-2, true);
+    this.beginWarp(CORE_INDEX, true);
   }
 
   beginWarp(target, core) {
@@ -1456,15 +1482,15 @@ export class Game {
     const ship = this.ship;
     const t = w.t;
     // charge
-    const charge = smooth(0, 1.6, t);
-    const exit = smooth(w.dur - 1.4, w.dur, t);
+    const charge = smoothstep(0, 1.6, t);
+    const exit = smoothstep(w.dur - 1.4, w.dur, t);
     ship.vel.copy(ship.forward(_v)).multiplyScalar(200 + charge * 3000 * (1 - exit));
     ship.pos.addScaledVector(ship.vel, dt * (w.loaded ? 0.02 : 1));
     ship.model.setThrust(0.6 + charge * 2, this.time);
     this.rig.followShip(ship, dt, null);
     this.rig.fov = 70 + charge * 35 * (1 - exit);
     this.rig.shake(dt * 3 * charge * (1 - exit));
-    const tunnel = smooth(1.2, 1.8, t) * (1 - smooth(w.dur - 1.2, w.dur - 0.4, t));
+    const tunnel = smoothstep(1.2, 1.8, t) * (1 - smoothstep(w.dur - 1.2, w.dur - 0.4, t));
     this.tunnel.update(this.time, tunnel, w.core ? 5 : 3.5);
     const flashIn = Math.max(0, 1 - Math.abs(t - 1.6) / 0.35);
     const flashOut = Math.max(0, 1 - Math.abs(t - (w.dur - 1.0)) / 0.35);
@@ -1488,6 +1514,8 @@ export class Game {
       this.story.onArrive(w.target);
       this.saveSoon = true;
       if (w.core) this.reachCore();
+      // Esc during the jump let go of the mouse without pausing
+      if (!document.pointerLockElement && !this.params.has('capture')) this.openMenu('pause');
     }
   }
 
@@ -1551,6 +1579,8 @@ export class Game {
       const d = body.def;
       sub = `${d.typeLabel}${d.isMoon ? ' moon' : ''}`;
       if (d.hazard && d.hazard.type !== 'none' && d.kind === 'rocky') sub += ` · ${HAZARD_LABEL[d.hazard.type]} ${Math.round(d.hazard.level * 100)}%`;
+      const found = this.state.discoveries[d.id];
+      if (found && found.life) sub += ` · Life ${found.found || 0}/${found.life}`;
       if (body instanceof Planet && frameBody) {
         const local = this.mode === 'foot' ? this.walker.pos : this.ship.pos;
         sub += ` · ${this.localTime(body, local)}`;
@@ -1582,10 +1612,8 @@ export class Game {
       hud.setTarget(this.shipTarget);
     } else {
       let prompt = null;
-      if (this.nearPoi) {
-        const verbs = { monolith: 'Listen to the Echo Stone', ruin: 'Take the shard', cache: 'Open the supply pod', beacon: 'Link to the beacon', spire: 'Touch the spire' };
-        prompt = `<kbd>E</kbd>${verbs[this.nearPoi.type] || 'Interact'}`;
-      } else if (this.nearShip) prompt = `<kbd>E</kbd>${this.state.story.stage === 'repair' ? 'Repair and board ship' : 'Board ship'}`;
+      if (this.nearPoi) prompt = `<kbd>E</kbd>${POI_INFO[this.nearPoi.type].verb || 'Interact'}`;
+      else if (this.nearShip) prompt = `<kbd>E</kbd>${this.state.story.stage === 'repair' ? 'Repair and board ship' : 'Board ship'}`;
       hud.prompt(prompt);
       const hz = this.walker.frame.def.hazard;
       const suit = this.state.suit;
@@ -1664,13 +1692,4 @@ function shipColors(seed) {
     accent: rng.pick(['#ff8a3c', '#3cc8ff', '#ff4f8a', '#b6ff3c', '#ffc93c', '#b58cff']),
     glow: rng.pick(['#6fd6ff', '#ffb45e', '#ff7ad8', '#7dffb0']),
   };
-}
-
-function kindLabel(kind) {
-  return { grazer: 'Grazer', flyer: 'Flyer', floater: 'Drifter', leviathan: 'Leviathan', tree: 'Tree', palm: 'Palm', icetree: 'Frost Tree', deadtree: 'Husk', twisttree: 'Twistwood', spiraltree: 'Spiral Tree', bulbtree: 'Lantern Tree', shrub: 'Shrub', dryshrub: 'Brush', frostshrub: 'Frostbloom', grass: 'Grass', flower: 'Glowflower', mushroom: 'Fungus', bigmushroom: 'Giant Fungus', pod: 'Light Pod', tendril: 'Tendril', cactus: 'Succulent' }[kind] || 'Flora';
-}
-
-function smooth(a, b, x) {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
 }

@@ -3,6 +3,7 @@ import { STAR_CLASSES, CLASS_KEYS, GALAXY_RADIUS, CORE_INDEX } from '../gen/gala
 import { generateSystem } from '../gen/system.js';
 import { stats } from '../game/upgrades.js';
 import { RNG } from '../core/rng.js';
+import { radialTexture } from '../render/textures.js';
 
 const starVert = /* glsl */ `
 attribute vec3 aColor;
@@ -35,17 +36,7 @@ void main() {
 `;
 
 function glowTexture(inner, outer) {
-  const s = 256;
-  const c = document.createElement('canvas');
-  c.width = c.height = s;
-  const g = c.getContext('2d');
-  const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-  grd.addColorStop(0, inner);
-  grd.addColorStop(0.3, outer);
-  grd.addColorStop(1, 'rgba(0,0,0,0)');
-  g.fillStyle = grd;
-  g.fillRect(0, 0, s, s);
-  return new THREE.CanvasTexture(c);
+  return radialTexture(256, [[0, inner], [0.3, outer], [1, 'rgba(0,0,0,0)']]);
 }
 
 function ringTexture() {
@@ -77,6 +68,7 @@ export class GalaxyMap {
     this.goalDist = 260;
     this.selected = -1;
     this.hover = -1;
+    this.mouse = null;
     this.open = false;
     this.dragging = false;
     this.buildUi(uiRoot);
@@ -177,6 +169,13 @@ export class GalaxyMap {
     this.goalMarker = new THREE.Sprite(new THREE.SpriteMaterial({ map: ringTex, color: new THREE.Color(1.6, 1.4, 2.4), depthWrite: false, depthTest: false }));
     this.goalMarker.scale.setScalar(10);
     this.scene.add(this.goalMarker);
+    // small fixed-size rings around systems already visited
+    this.visitedPts = new THREE.Points(
+      new THREE.BufferGeometry(),
+      new THREE.PointsMaterial({ map: ringTex, size: 12, sizeAttenuation: false, color: new THREE.Color(0.75, 0.9, 1.1), transparent: true, opacity: 0.7, depthWrite: false, depthTest: false })
+    );
+    this.visitedPts.frustumCulled = false;
+    this.scene.add(this.visitedPts);
 
     const rangeGeo = new THREE.RingGeometry(0.985, 1, 96);
     rangeGeo.rotateX(-Math.PI / 2);
@@ -207,12 +206,15 @@ export class GalaxyMap {
         <div><i style="--c:#e8eeff"></i>White stars, needs Frost Drive</div>
         <div><i style="--c:#8fb0ff"></i>Blue giants, needs Azure Drive</div>
         <div><i style="--c:#c07bff"></i>Anomalous stars, needs Chorus Drive</div>
+        <div><i class="ring"></i>Visited</div>
         <div class="gmap-keys"><kbd>Drag</kbd>rotate <kbd>Wheel</kbd>zoom <kbd>C</kbd>center <kbd>T</kbd>signal <kbd>G</kbd>close</div>
       </div>
-      <div class="gmap-info"></div>`;
+      <div class="gmap-info"></div>
+      <div class="gmap-hover"></div>`;
     root.appendChild(ui);
     this.ui = ui;
     this.info = ui.querySelector('.gmap-info');
+    this.hoverEl = ui.querySelector('.gmap-hover');
     this.info.addEventListener('click', (e) => {
       const b = e.target.closest('[data-act]');
       if (!b || b.disabled) return;
@@ -233,7 +235,10 @@ export class GalaxyMap {
     });
     window.addEventListener('mouseup', (e) => {
       if (!this.open) return;
-      if (this.dragging && moved < 5 && e.target === canvas) this.pick(e.clientX, e.clientY, true);
+      if (this.dragging && moved < 5 && e.target === canvas) {
+        const i = this.pick(e.clientX, e.clientY);
+        if (i >= 0) this.select(i);
+      }
       this.dragging = false;
     });
     window.addEventListener('mousemove', (e) => {
@@ -245,7 +250,11 @@ export class GalaxyMap {
         ly = e.clientY;
         this.yaw -= dx * 0.005;
         this.pitch = Math.max(0.05, Math.min(1.5, this.pitch + dy * 0.005));
-      } else if (e.target === canvas) this.pick(e.clientX, e.clientY, false);
+        this.mouse = null;
+      } else {
+        // picking tests every star, so it runs once per frame at most
+        this.mouse = { x: e.clientX, y: e.clientY, over: e.target === canvas };
+      }
     });
     canvas.addEventListener('wheel', (e) => {
       if (!this.open) return;
@@ -293,6 +302,8 @@ export class GalaxyMap {
   hide() {
     this.open = false;
     this.ui.classList.remove('open');
+    this.mouse = null;
+    this.setHover(-1);
   }
 
   refreshStates() {
@@ -309,6 +320,12 @@ export class GalaxyMap {
     }
     for (const v of st.visited) arr[v] = Math.max(arr[v], 0.2);
     this.stateAttr.needsUpdate = true;
+    const seen = st.visited.filter((v) => v >= 0 && v !== st.systemIndex);
+    const vp = new Float32Array(seen.length * 3);
+    seen.forEach((v, i) => vp.set(g.pos(v), i * 3));
+    this.visitedPts.geometry.dispose();
+    this.visitedPts.geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(vp, 3));
+    this.visitedPts.material.size = 12 * this.game.renderer.getPixelRatio();
     this.range = s.warpRange;
     this.hereMarker.position.fromArray(here);
     this.rangeRing.position.fromArray(here);
@@ -325,7 +342,8 @@ export class GalaxyMap {
     }
   }
 
-  pick(x, y, click) {
+  // nearest star within 14 px of a screen point, or -1
+  pick(x, y) {
     const g = this.galaxy;
     const w = this.game.viewW, h = this.game.viewH;
     const v = new THREE.Vector3();
@@ -340,9 +358,29 @@ export class GalaxyMap {
         best = i;
       }
     }
-    this.hover = best;
-    this.game.renderer.domElement.style.cursor = best >= 0 ? 'pointer' : 'grab';
-    if (click && best >= 0) this.select(best);
+    return best;
+  }
+
+  // name, class and distance next to the cursor
+  setHover(i, x, y) {
+    this.game.renderer.domElement.style.cursor = !this.open ? '' : i >= 0 ? 'pointer' : 'grab';
+    if (i < 0) {
+      this.hover = -1;
+      this.hoverEl.classList.remove('show');
+      return;
+    }
+    if (i !== this.hover) {
+      const g = this.galaxy;
+      const st = this.game.state;
+      const info = g.info(i);
+      const cls = STAR_CLASSES[info.cls];
+      let sub = 'You are here';
+      if (i !== st.systemIndex) sub = `${cls.label} · ${Math.round(g.dist(st.systemIndex, i))} ly${st.visited.includes(i) ? ' · Visited' : ''}`;
+      this.hoverEl.innerHTML = `<b style="--c:${cls.color}">${info.name}</b>${sub}`;
+    }
+    this.hover = i;
+    this.hoverEl.classList.add('show');
+    this.hoverEl.style.transform = `translate(${Math.round(x + 16)}px, ${Math.round(y + 12)}px)`;
   }
 
   select(i) {
@@ -362,11 +400,13 @@ export class GalaxyMap {
     this.renderInfo();
   }
 
-  renderInfo() {
+  // err replaces the usual reason, for a jump that failed at the last check
+  renderInfo(err) {
     const g = this.galaxy;
     const st = this.game.state;
     const i = this.selected;
     const here = st.systemIndex;
+    const blocker = this.game.warpBlocker();
     let html = '';
     const hereInfo = g.info(here);
     html += `<div class="gi-here">Current: <b>${hereInfo.name}</b> · ${Math.round(g.distToCore(here))} ly from the core</div>`;
@@ -380,10 +420,13 @@ export class GalaxyMap {
       const allowed = s.warpClasses.includes(info.cls);
       const inRange = dist <= s.warpRange;
       const isGoal = i === this.goalStar();
-      let why = '';
-      if (!allowed) why = `Your drive cannot hold ${cls.label.toLowerCase()}s yet.`;
-      else if (!inRange) why = `Out of range (${Math.round(s.warpRange)} ly).`;
-      else if (st.warpCells < 1) why = 'You need a Warp Cell. Craft one from Hydrogel and Ferrite.';
+      let why = err || '';
+      if (!why) {
+        if (!allowed) why = `Your drive cannot hold ${cls.label.toLowerCase()}s yet.`;
+        else if (!inRange) why = `Out of range (${Math.round(s.warpRange)} ly).`;
+        else if (st.warpCells < 1) why = 'You need a Warp Cell. Craft one from Hydrogel and Ferrite.';
+        else if (blocker) why = blocker;
+      }
       const types = sys.planets.map((p) => p.typeLabel);
       const summary = [...new Set(types)].slice(0, 5).join(', ');
       html += `<div class="gi-name" style="--c:${cls.color}">${info.name}${isGoal ? ' <span class="gi-goal">Signal</span>' : ''}</div>
@@ -396,14 +439,20 @@ export class GalaxyMap {
       html += `<div class="gi-hint">Click a star to plot a jump. Bright stars are in range.</div>`;
     }
     if ((st.story.stage === 'core' || st.story.stage === 'end') && here !== CORE_INDEX) {
-      const ok = st.story.flags.lens && st.warpCells >= 1;
-      html += `<div class="gi-core"><b>Core Jump</b><div>Uses the Harmonic Lens and one Warp Cell.</div><button class="btn primary" data-act="core" ${ok ? '' : 'disabled'}>Jump to the core</button></div>`;
+      const ready = st.story.flags.lens && st.warpCells >= 1;
+      const note = ready && blocker ? `<div class="gi-why">${blocker}</div>` : '';
+      html += `<div class="gi-core"><b>Core Jump</b><div>Uses the Harmonic Lens and one Warp Cell.</div>${note}<button class="btn primary" data-act="core" ${ready && !blocker ? '' : 'disabled'}>Jump to the core</button></div>`;
     }
     html += `<div class="gi-cells">${st.warpCells} Warp Cell${st.warpCells === 1 ? '' : 's'} · Range ${Math.round(stats(st).warpRange)} ly</div>`;
     this.info.innerHTML = html;
   }
 
   render(dt, pipeline) {
+    const m = this.mouse;
+    if (m) {
+      this.mouse = null;
+      this.setHover(m.over ? this.pick(m.x, m.y) : -1, m.x, m.y);
+    } else if (this.dragging && this.hover >= 0) this.setHover(-1);
     this.target.lerp(this.goalTarget, 1 - Math.exp(-dt * 6));
     this.dist += (this.goalDist - this.dist) * (1 - Math.exp(-dt * 3.5));
     const cp = Math.cos(this.pitch);

@@ -1,11 +1,12 @@
 import { STAR_CLASSES } from '../gen/galaxy.js';
-import { stats, level, UPGRADES } from './upgrades.js';
+import { stats, level, UPGRADES, RECIPES } from './upgrades.js';
 import { Planet } from '../world/planet.js';
 
 // Objective chain. Stages move forward on events from the game, and
 // objective() describes what the HUD should show for the current stage.
 
 const REPAIR = { ferrite: 40, carbon: 25 };
+const WARP_CELL = RECIPES.find((r) => r.id === 'warpcell').cost;
 
 export class Story {
   constructor(game) {
@@ -53,7 +54,7 @@ export class Story {
         const cells = st.warpCells;
         return {
           title: 'Warp Fuel',
-          text: `Warp jumps burn Warp Cells. Mine <b>Hydrogel</b> from blue crystals, then craft a cell in the inventory (<b>Tab</b>).<br>Hydrogel ${k('hydrogel', 40)} Ferrite ${k('ferrite', 20)}<br>Warp Cells ${cells}/1`,
+          text: `Warp jumps burn Warp Cells. Mine <b>Hydrogel</b> from blue crystals, then craft a cell in the inventory (<b>Tab</b>).<br>Hydrogel ${k('hydrogel', WARP_CELL.hydrogel)} Ferrite ${k('ferrite', WARP_CELL.ferrite)}<br>Warp Cells ${cells}/1`,
         };
       }
       case 'signal': {

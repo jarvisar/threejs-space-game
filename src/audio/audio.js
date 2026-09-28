@@ -37,7 +37,6 @@ export class AudioEngine {
     this.ctx = null;
     this.volume = 0.8;
     this.musicVolume = 0.55;
-    this.started = false;
   }
 
   init() {
@@ -79,7 +78,6 @@ export class AudioEngine {
     this.mood = null;
     this.nextNote = 0;
     this.nextChord = 0;
-    this.started = true;
   }
 
   impulse(seconds, decay) {
@@ -184,9 +182,15 @@ export class AudioEngine {
     param.setTargetAtTime(value, this.ctx.currentTime, rate);
   }
 
+  // Until the first click the context is suspended. Anything scheduled then
+  // would all play at once when it starts, so nothing is.
+  get running() {
+    return !!this.ctx && this.ctx.state === 'running';
+  }
+
   // called every frame with the game state that drives continuous sounds
   update(p) {
-    if (!this.ctx) return;
+    if (!this.running) return;
     const e = this.engine;
     const ship = p.shipAudible ? 1 : 0;
     const thr = Math.max(0, p.throttle || 0);
@@ -217,7 +221,7 @@ export class AudioEngine {
   }
 
   tone(freq, dur, type = 'sine', vol = 0.2, bus, when = 0, sweepTo) {
-    if (!this.ctx) return;
+    if (!this.running) return;
     const ctx = this.ctx;
     const t = ctx.currentTime + when;
     const o = ctx.createOscillator();
@@ -234,7 +238,7 @@ export class AudioEngine {
   }
 
   noiseHit(dur, freq, q, vol, when = 0, sweepTo) {
-    if (!this.ctx) return;
+    if (!this.running) return;
     const ctx = this.ctx;
     const t = ctx.currentTime + when;
     const s = ctx.createBufferSource();
@@ -321,14 +325,15 @@ export class AudioEngine {
 
   // ---------------------------------------------------------------- music
 
+  // called every frame, only does anything when the mood changes
   setMood(key, seed) {
     if (!this.ctx) return;
+    const id = `${key}:${seed}`;
+    if (this.mood && this.mood.id === id) return;
     const def = MOODS[key] || MOODS.space;
     const rng = new RNG(seed >>> 0);
     const scale = SCALES[rng.pick(def.scales)];
     const root = 45 + rng.int(0, 7);
-    const id = `${key}:${seed}`;
-    if (this.mood && this.mood.id === id) return;
     this.mood = { id, def, scale, root, rng, chord: 0 };
     this.nextChord = 0;
   }

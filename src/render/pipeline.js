@@ -18,8 +18,6 @@ uniform float uFlash;
 uniform vec3 uFlashColor;
 uniform float uAberration;
 uniform float uGrain;
-uniform float uFade;
-uniform vec3 uTint;
 varying vec2 vUv;
 
 vec3 RRTAndODTFit(vec3 v) {
@@ -51,7 +49,6 @@ void main() {
   }
   col += texture2D(tBloom, uv).rgb * uBloom;
   col *= uExposure;
-  col *= uTint;
   col = aces(col);
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
   col = mix(vec3(l), col, uSaturation);
@@ -60,7 +57,6 @@ void main() {
   col *= mix(1.0, vig, uVignette);
   col = toSRGB(col);
   col += (rand(uv * 731.0 + fract(uTime * 7.0)) - 0.5) * uGrain;
-  col *= uFade;
   gl_FragColor = vec4(col, 1.0);
 }
 `;
@@ -115,8 +111,6 @@ export class Pipeline {
       uFlashColor: { value: new THREE.Color(1, 1, 1) },
       uAberration: { value: 0 },
       uGrain: { value: 0.012 },
-      uFade: { value: 1 },
-      uTint: { value: new THREE.Color(1, 1, 1) },
     };
     this.finalQuad = new FullScreenQuad(
       new THREE.ShaderMaterial({

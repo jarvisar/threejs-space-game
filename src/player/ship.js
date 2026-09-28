@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { buildShip } from './shipModel.js';
-import { Planet } from '../world/planet.js';
+import { Planet, surfaceNormal } from '../world/planet.js';
+import { smoothstep, lerp } from '../core/math.js';
 
-export const GEAR_HEIGHT = 2.05;
+const GEAR_HEIGHT = 2.05;
 const CLEARANCE = 2.4;
 
 const _v = new THREE.Vector3();
@@ -11,29 +12,6 @@ const _q = new THREE.Quaternion();
 const X = new THREE.Vector3(1, 0, 0);
 const Y = new THREE.Vector3(0, 1, 0);
 const Z = new THREE.Vector3(0, 0, 1);
-
-function ease(t) {
-  return t * t * (3 - 2 * t);
-}
-
-// Surface normal from three height samples around a local direction
-export function surfaceNormal(planet, dir, eps = 1.5) {
-  const t1 = _v.set(0, 1, 0).cross(dir);
-  if (t1.lengthSq() < 1e-6) t1.set(1, 0, 0).cross(dir);
-  t1.normalize();
-  const t2 = _v2.copy(dir).cross(t1).normalize();
-  const R = planet.radius;
-  const a = eps / R;
-  const d0 = dir.clone();
-  const d1 = dir.clone().addScaledVector(t1, a).normalize();
-  const d2 = dir.clone().addScaledVector(t2, a).normalize();
-  const p0 = d0.multiplyScalar(R + planet.heightAt(dir));
-  const p1 = d1.multiplyScalar(R + planet.heightAt(d1));
-  const p2 = d2.multiplyScalar(R + planet.heightAt(d2));
-  const n = new THREE.Vector3().subVectors(p1, p0).cross(new THREE.Vector3().subVectors(p2, p0)).normalize();
-  if (n.dot(dir) < 0) n.negate();
-  return n;
-}
 
 // Arcade flight model with mouse aim. The camera follows `aim`, the hull turns
 // toward it at a limited rate. All state is in the current frame, either the
@@ -59,7 +37,6 @@ export class Ship {
     this.speed = 0;
     this.altitude = Infinity;
     this.inAtmo = 0;
-    this.hull = 1;
     this.stats = {
       speed: 180,
       boost: 480,
@@ -69,10 +46,6 @@ export class Ship {
       turn: 1.8,
     };
     this.events = [];
-  }
-
-  get flying() {
-    return this.state === 'flying';
   }
 
   worldPos(out = new THREE.Vector3()) {
@@ -85,10 +58,6 @@ export class Ship {
 
   forward(out = new THREE.Vector3()) {
     return out.set(0, 0, -1).applyQuaternion(this.quat);
-  }
-
-  localUp(out = new THREE.Vector3()) {
-    return out.copy(this.pos).normalize();
   }
 
   // move into a new frame keeping the world-space motion continuous
@@ -127,7 +96,7 @@ export class Ship {
       _v.copy(this.pos).divideScalar(r);
       this.altitude = r - this.frame.floorRadius(_v);
       const atmoH = this.frame.atmoRadius - this.frame.radius;
-      this.inAtmo = 1 - smooth(atmoH * 0.7, atmoH * 1.25, r - this.frame.radius);
+      this.inAtmo = 1 - smoothstep(atmoH * 0.7, atmoH * 1.25, r - this.frame.radius);
     } else {
       this.altitude = Infinity;
       this.inAtmo = 0;
@@ -262,7 +231,6 @@ export class Ship {
       if (inward > 0) {
         this.vel.addScaledVector(dir, inward * 1.25);
         if (inward > 14) {
-          this.hull = Math.max(0.05, this.hull - inward * 0.0025);
           this.emit('impact', { speed: inward });
         } else if (inward > 4) {
           this.emit('scrape', { speed: inward });
@@ -327,7 +295,7 @@ export class Ship {
   updateAnim(dt) {
     const a = this.anim;
     a.t = Math.min(1, a.t + dt / a.dur);
-    const e = ease(a.t);
+    const e = smoothstep(0, 1, a.t);
     if (a.kind === 'landing') {
       // come down steeply at the end like a hover landing
       const k = Math.pow(e, 0.8);
@@ -383,13 +351,4 @@ export class Ship {
     this.worldQuat(this.model.root.quaternion);
     this.model.body.rotation.set(0, 0, this.bank);
   }
-}
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-function smooth(a, b, x) {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
 }
