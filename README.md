@@ -2,7 +2,7 @@
 
 A procedural space exploration game for the browser, built with Three.js. Land on low poly planets, fly between them without loading screens, and follow a signal across a galaxy of 24,000 star systems toward its core.
 
-Visit [spacegame.ajarvis.co](https://spacegame.ajarvis.co) to play the latest deployment.
+Visit [spacegame.jarvisar.com](https://spacegame.jarvisar.com) to play the latest deployment.
 
 ## Features
 
@@ -112,7 +112,7 @@ To make a static build, run `npm run build`. The output in `dist` uses relative 
 
 ## Deployment
 
-Pushing to `main` runs `.github/workflows/deploy.yml`, which builds the site and deploys `dist` to GitHub Pages. In the repo settings under Pages, the source has to be set to GitHub Actions and the custom domain to `spacegame.ajarvis.co`, with a CNAME record for `spacegame` pointing at `jarvisar.github.io`. Once GitHub has issued the certificate, turn on `Enforce HTTPS` too, since the service worker and the install button only work over HTTPS.
+Pushing to `main` runs `.github/workflows/deploy.yml`, which builds the site and deploys `dist` to GitHub Pages. In the repo settings under Pages, the source has to be set to GitHub Actions and the custom domain to `spacegame.jarvisar.com`, with a CNAME record for `spacegame` pointing at `jarvisar.github.io`. Once GitHub has issued the certificate, turn on `Enforce HTTPS` too, since the service worker and the install button only work over HTTPS.
 
 Players who already loaded the game keep the cached version until they close all its tabs and open it again, or click `Restart to update` on the title screen.
 
