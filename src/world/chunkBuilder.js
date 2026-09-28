@@ -1,4 +1,5 @@
 import { faceDir } from '../gen/terrain.js';
+import { hash3 } from '../core/rng.js';
 
 export const CHUNK_N = 33;
 
@@ -71,12 +72,26 @@ export function buildChunk(gen, R, face, level, x, y, N) {
   const gf = new Float32Array(G * G);
   const d = [0, 0, 0];
   const out = { h: 0, m: 0, f: 0 };
+  const cells = N - 1;
+  const faceCells = (1 << level) * cells;
+  const scatter = 0.24 * Math.max(0, Math.min(1, (24 - spacing) / 16));
 
   for (let j = 0; j < G; j++) {
     const v = v0 + (j - 1) * step;
     for (let i = 0; i < G; i++) {
       const u = u0 + (i - 1) * step;
-      faceDir(face, u, v, d);
+      const gx = x * cells + i - 1, gy = y * cells + j - 1;
+      let du = 0, dv = 0;
+      if (scatter > 0 && gx > 0 && gy > 0 && gx < faceCells && gy < faceCells) {
+        // Keep chunk borders fixed for LOD joins. Global grid coordinates also
+        // give the ghost samples the same positions as the neighboring chunk.
+        const ix = gx % cells, iy = gy % cells;
+        const edge = Math.min(1, ix * 0.5, (cells - ix) * 0.5, iy * 0.5, (cells - iy) * 0.5);
+        const h = hash3(gx, gy, face, 0x6a09e667);
+        du = ((h & 65535) / 32767.5 - 1) * scatter * step * edge;
+        dv = ((h >>> 16) / 32767.5 - 1) * scatter * step * edge;
+      }
+      faceDir(face, u + du, v + dv, d);
       gen.sample(d[0], d[1], d[2], out, lod);
       const r = R + out.h;
       const o = (j * G + i) * 3;

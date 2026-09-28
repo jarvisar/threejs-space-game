@@ -6,6 +6,7 @@ import { Body } from './body.js';
 import { CloudPuffs } from './clouds.js';
 import { smoothstep } from '../core/math.js';
 import { RNG } from '../core/rng.js';
+import { detail } from '../render/quality.js';
 
 const _v = new THREE.Vector3();
 const _t1 = new THREE.Vector3();
@@ -231,7 +232,7 @@ export class Planet extends Body {
   shouldSplit(node) {
     if (node.level >= this.maxLevel) return false;
     const d = _v.subVectors(this.camLocal, node.center).length() - node.size * 0.5;
-    return d < node.size * this.lodFactor;
+    return d < node.size * this.lodFactor * detail.lod;
   }
 
   updateNode(node) {

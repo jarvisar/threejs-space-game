@@ -1,5 +1,6 @@
 import './ui/style.css';
 import './ui/menus.css';
+import './ui/touch.css';
 import { Game } from './game/Game.js';
 import { initPwa, registerServiceWorker } from './pwa.js';
 import { loader } from './ui/loader.js';

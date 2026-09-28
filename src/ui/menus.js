@@ -4,6 +4,7 @@ import { canInstall, updateReady, promptInstall, applyUpdate, onPwaChange } from
 import { el } from './dom.js';
 import { swatchStyle } from '../game/facts.js';
 import { WONDERS } from '../world/wonders.js';
+import { device, canFullscreen, toggleFullscreen } from '../core/device.js';
 
 // have/need, same as the objective panel
 function costHtml(state, cost) {
@@ -29,16 +30,34 @@ const CONTROLS = [
   ['Photo mode', [['WASD', 'Fly'], ['R / F', 'Up, down'], ['Q / E', 'Roll'], ['Shift', 'Fast'], ['Wheel', 'Speed'], ['Z / X', 'Time of day'], ['1 / 2', 'Zoom'], ['B', 'Focus blur'], ['V', 'Filter'], ['H', 'Hide ship'], ['Enter', 'Save a screenshot'], ['P', 'Back to the game']]],
 ];
 
+// same layout as CONTROLS, the first column is a button or a part of the screen
+const TOUCH_CONTROLS = [
+  ['On foot', [['Left side', 'Move, push all the way to sprint'], ['Right side', 'Look'], ['Jump', 'Hold for jetpack'], ['Mine', 'Hold, drag it to aim'], ['Analyze', 'Hold on plants and creatures'], ['Scan', 'Scanner pulse']]],
+  ['In the ship', [['Right side', 'Steer, the further you drag the faster it turns'], ['Left side', 'Throttle and roll'], ['Boost', 'Hold for speed'], ['Pulse', 'Pulse drive, away from planets'], ['Fire', 'Mining lasers, shows up on asteroids'], ['Pinch', 'Camera distance']]],
+  ['Anywhere', [['Top right', 'Galaxy map, inventory, photo mode and pause'], ['Pop-up buttons', 'Land, board, orbit and interact when you can']]],
+];
+
 const SETTINGS = [
-  ['sensitivity', 'Mouse sensitivity', 'range', 0.3, 2.5, 0.05, (v) => v.toFixed(2)],
-  ['invertY', 'Invert mouse Y', 'checkbox'],
+  ['sensitivity', 'Look sensitivity', 'range', 0.3, 2.5, 0.05, (v) => v.toFixed(2)],
+  ['invertY', 'Invert look Y', 'checkbox'],
+  ['quality', 'Graphics', 'range', 0, 2, 1, (v) => ['Low', 'Medium', 'High'][v]],
   ['renderScale', 'Render scale', 'range', 0.5, 1, 0.05, (v) => `${Math.round(v * 100)}%`],
+  ['autoScale', 'Adaptive resolution', 'checkbox'],
   ['shadows', 'Shadows', 'checkbox'],
   ['ao', 'Ambient occlusion', 'checkbox'],
   ['dof', 'Depth of field', 'checkbox'],
   ['volume', 'Volume', 'range', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`],
   ['music', 'Music', 'range', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`],
 ];
+
+// hover text for the settings that aren't obvious from the name
+const SETTING_TIPS = {
+  quality: 'Low and Medium draw less detail in the distance and use cheaper sky and shadows.',
+  renderScale: 'Resolution of the 3D view. Lower runs faster, the HUD stays sharp.',
+  autoScale: 'Lowers the render scale on its own while the frame rate is low.',
+  ao: 'Soft shading in corners and under plants. Fairly expensive.',
+  dof: 'Softens the distance a little while on foot.',
+};
 
 export class Menus {
   constructor(root, game) {
@@ -73,7 +92,9 @@ export class Menus {
     this.titleControls = el('div', 'controls-panel', inner);
     this.titleControls.style.display = 'none';
     this.titleControls.innerHTML = this.controlsHtml();
-    el('div', 'title-foot', t, 'Click the view to capture the mouse. Best with a mouse and keyboard.');
+    // iPhones can't go fullscreen from the page, only from the home screen
+    const home = !canFullscreen() && !device.standalone ? ' Add it to your home screen to play fullscreen.' : '';
+    el('div', 'title-foot', t, `<span class="no-touch">Click the view to capture the mouse. Best with a mouse and keyboard.</span><span class="only-touch">Best played in landscape.${home}</span>`);
     const pwa = el('div', 'title-pwa', t);
     this.btnInstall = el('button', 'btn small', pwa, 'Install app');
     this.btnUpdate = el('button', 'btn small primary', pwa, 'Restart to update');
@@ -115,7 +136,7 @@ export class Menus {
       this.confirmNew = true;
       this.btnNew.textContent = 'Replace save?';
       this.btnNew.classList.add('warn');
-      this.saveInfo.textContent = 'Click again to start over. This deletes your current save.';
+      this.saveInfo.textContent = `${device.touch ? 'Tap' : 'Click'} again to start over. This deletes your current save.`;
       this.saveInfo.classList.add('warn');
       clearTimeout(this.confirmT);
       this.confirmT = setTimeout(() => this.resetNewJourney(), 5000);
@@ -135,8 +156,10 @@ export class Menus {
     this.saveInfo.textContent = this.save ? `${this.save.system} · ${fmtPlayTime(this.save.playTime)} played` : '';
   }
 
+  // both sets are in the page, CSS shows the one for the current input
   controlsHtml() {
-    return CONTROLS.map(([group, rows]) => `<div class="ctl-group"><h4>${group}</h4><div class="ctl-grid">${rows.map(([k, d]) => `<kbd>${k}</kbd><span>${d}</span>`).join('')}</div></div>`).join('');
+    const group = (cls) => ([name, rows]) => `<div class="ctl-group ${cls}"><h4>${name}</h4><div class="ctl-grid">${rows.map(([k, d]) => `<kbd>${k}</kbd><span>${d}</span>`).join('')}</div></div>`;
+    return CONTROLS.map(group('no-touch')).join('') + TOUCH_CONTROLS.map(group('only-touch')).join('');
   }
 
   // ---------------------------------------------------------------- pause
@@ -148,17 +171,24 @@ export class Menus {
     const resume = el('button', 'btn primary', main, 'Resume');
     const save = el('button', 'btn', main, 'Save');
     const quit = el('button', 'btn', main, 'Save and quit to title');
+    if (canFullscreen()) {
+      const fs = el('button', 'btn only-touch', main, 'Fullscreen');
+      fs.onclick = () => toggleFullscreen();
+      document.addEventListener('fullscreenchange', () => (fs.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen'));
+    }
     el('h4', '', main, 'Settings');
     const settings = el('div', 'settings', main);
-    settings.innerHTML = SETTINGS.map(([k, label, type, min, max, step]) =>
-      type === 'range'
-        ? `<label>${label}<input type="range" min="${min}" max="${max}" step="${step}" data-k="${k}"><output data-k="${k}"></output></label>`
-        : `<label>${label}<input type="checkbox" data-k="${k}"></label>`
-    ).join('');
+    settings.innerHTML = SETTINGS.map(([k, label, type, min, max, step]) => {
+      const tip = SETTING_TIPS[k] ? ` title="${SETTING_TIPS[k]}"` : '';
+      return type === 'range'
+        ? `<label${tip}>${label}<input type="range" min="${min}" max="${max}" step="${step}" data-k="${k}"><output data-k="${k}"></output></label>`
+        : `<label${tip}>${label}<input type="checkbox" data-k="${k}"></label>`;
+    }).join('');
     this.settingsEl = settings;
     const controls = el('div', 'controls-panel small', panel);
     controls.innerHTML = this.controlsHtml();
     resume.onclick = () => this.game.closeMenus();
+    this.tapOutside(p);
     save.onclick = () => {
       this.game.saveGame();
       save.textContent = 'Saved';
@@ -171,6 +201,14 @@ export class Menus {
       const v = e.target.type === 'checkbox' ? e.target.checked : parseFloat(e.target.value);
       this.game.setSetting(k, v);
       this.showSettingValue(k, v);
+    });
+  }
+
+  // With touch, tapping the dimmed area around a panel closes it. The mouse
+  // doesn't get this, a stray click there would resume the game.
+  tapOutside(screen) {
+    screen.addEventListener('click', (e) => {
+      if (device.touch && e.target === screen) this.game.closeMenus();
     });
   }
 
@@ -204,6 +242,7 @@ export class Menus {
     }
     this.invStatus = el('div', 'inv-status', head);
     el('button', 'inv-close', head, '<kbd>Tab</kbd> close').onclick = () => this.game.closeMenus();
+    this.tapOutside(s);
     this.invBody = el('div', 'inv-body', panel);
     this.tab = 'cargo';
     this.invBody.addEventListener('click', (e) => {
@@ -292,7 +331,7 @@ export class Menus {
     if (!wonders.length) h += '<div class="j-empty">Walk or fly close to a landmark to log it.</div>';
     h += '<h4>Species</h4>';
     for (const sp of [...species].reverse()) h += `<div class="j-row"><b>${sp.name}</b><span>${sp.label ? `${sp.label} · ` : ''}${sp.planet}</span></div>`;
-    if (!species.length) h += '<div class="j-empty">Hold Right Mouse on a plant or creature to catalogue it.</div>';
+    if (!species.length) h += `<div class="j-empty">Hold ${device.touch ? 'Analyze' : 'Right Mouse'} on a plant or creature to catalogue it.</div>`;
     h += '</div><div class="j-col"><h4>Logs</h4>';
     for (const l of [...st.lore].reverse()) h += `<div class="j-lore"><div class="j-lore-title">${l.title}</div>${l.text.map((p) => `<p>${p}</p>`).join('')}</div>`;
     if (!st.lore.length) h += '<div class="j-empty">Messages from Echo Stones, ruins, wrecks and spires are saved here.</div>';

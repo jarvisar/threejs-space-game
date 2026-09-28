@@ -147,7 +147,37 @@ function rockPoints(rng, r, sx, sy, sz, cuts = 3, count = 22, floor = 0.35) {
 }
 
 function hullRock(rng, r, sx, sy, sz, cuts, count, floor) {
-  return new ConvexGeometry(rockPoints(rng, r, sx, sy, sz, cuts, count, floor));
+  const points = rockPoints(rng, r, sx, sy, sz, cuts, count, floor);
+  return count >= 22 ? chippedHull(points, 0.1) : new ConvexGeometry(points);
+}
+
+// Inset each planar face, then hull the insets to leave narrow chipped edges.
+// Coplanar triangles share an inset so triangulation doesn't carve extra seams.
+function chippedHull(points, bevel = 0.1) {
+  const hull = new ConvexGeometry(points);
+  const pos = hull.attributes.position;
+  const normal = hull.attributes.normal;
+  const faces = new Map();
+  for (let i = 0; i < pos.count; i += 3) {
+    const n = new THREE.Vector3().fromBufferAttribute(normal, i);
+    const a = new THREE.Vector3().fromBufferAttribute(pos, i);
+    const key = [n.x, n.y, n.z, n.dot(a)].map((v) => Math.round(v * 1e4)).join(',');
+    if (!faces.has(key)) faces.set(key, new Map());
+    const face = faces.get(key);
+    for (let j = 0; j < 3; j++) {
+      const p = new THREE.Vector3().fromBufferAttribute(pos, i + j);
+      face.set(p.toArray().map((v) => Math.round(v * 1e5)).join(','), p);
+    }
+  }
+  const inset = [];
+  for (const face of faces.values()) {
+    const center = new THREE.Vector3();
+    for (const p of face.values()) center.add(p);
+    center.divideScalar(face.size);
+    for (const p of face.values()) inset.push(p.clone().lerp(center, bevel));
+  }
+  hull.dispose();
+  return new ConvexGeometry(inset);
 }
 
 // What grows on top of rocks, by planet type
@@ -362,6 +392,11 @@ function leafStrip(len, w, rise, droop, segs = 3, fold = 0.3, lobes = 0) {
     const t = i / segs;
     const x = len * t;
     const y = len * (rise * t - droop * t * t);
+    if (i === segs) {
+      pos.push(x, y, 0);
+      at.push(1);
+      break;
+    }
     let ww = w * (0.25 + 0.75 * Math.sin(Math.PI * t)) * (1 - t * t * t);
     if (lobes && i % 2 && i < segs) ww *= 1 - lobes;
     pos.push(x, y, -ww, x, y + fold * ww, 0, x, y, ww);
@@ -369,7 +404,8 @@ function leafStrip(len, w, rise, droop, segs = 3, fold = 0.3, lobes = 0) {
   }
   for (let i = 0; i < segs; i++) {
     const a = i * 3;
-    idx.push(a, a + 1, a + 3, a + 1, a + 4, a + 3, a + 1, a + 2, a + 4, a + 2, a + 5, a + 4);
+    if (i === segs - 1) idx.push(a, a + 1, a + 3, a + 1, a + 2, a + 3);
+    else idx.push(a, a + 1, a + 3, a + 1, a + 4, a + 3, a + 1, a + 2, a + 4, a + 2, a + 5, a + 4);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -395,7 +431,9 @@ function bloomDisc(R, m, fat, notch, cup, rings = 2) {
     for (let k = 0; k < N; k++) {
       const a = (k / N) * Math.PI * 2;
       const r = R * f * (j < rings ? 0.6 + 0.4 * rs[k] : rs[k]);
-      pos.push(Math.cos(a) * r, cup * (r / R) * (r / R), Math.sin(a) * r);
+      const crease = Math.sin((k % seg) / seg * Math.PI) ** 2;
+      const curl = R * 0.15 * crease * f * f + R * 0.045 * Math.sin(a * 3) * f;
+      pos.push(Math.cos(a) * r, cup * (r / R) * (r / R) + curl, Math.sin(a) * r);
       at.push(j < rings ? f * 0.6 : rs[k]);
     }
   }
@@ -424,20 +462,32 @@ function crystalPrism(r, h, sides, tipH, taper = 0.85, skew = 0, cap = false) {
     const out = [];
     for (let s = 0; s < sides; s++) {
       const a = (s / sides) * Math.PI * 2;
-      out.push([Math.cos(a) * rr, y, Math.sin(a) * rr]);
+      if (r >= 0.13) {
+        // Narrow bevels leave broad gem faces that catch a different light.
+        const b = ((s - 1) / sides) * Math.PI * 2;
+        const c = ((s + 1) / sides) * Math.PI * 2;
+        out.push([(Math.cos(a) * 0.84 + Math.cos(b) * 0.16) * rr, y, (Math.sin(a) * 0.84 + Math.sin(b) * 0.16) * rr]);
+        out.push([(Math.cos(a) * 0.84 + Math.cos(c) * 0.16) * rr, y, (Math.sin(a) * 0.84 + Math.sin(c) * 0.16) * rr]);
+      } else out.push([Math.cos(a) * rr, y, Math.sin(a) * rr]);
     }
     return out;
   };
   const b = ring(0, r), t = ring(h, r * taper);
+  const shoulder = r >= 0.13 ? ring(h * 0.84, r * (taper + 0.065)) : null;
   const apex = [skew * r, L, 0];
   const tri = (p, q, s) => {
     pos.push(...p, ...q, ...s);
     at.push(p[1] / L, q[1] / L, s[1] / L);
   };
-  for (let s = 0; s < sides; s++) {
-    const s1 = (s + 1) % sides;
-    tri(b[s], t[s], b[s1]);
-    tri(b[s1], t[s], t[s1]);
+  for (let s = 0; s < b.length; s++) {
+    const s1 = (s + 1) % b.length;
+    const mid = shoulder || t;
+    tri(b[s], mid[s], b[s1]);
+    tri(b[s1], mid[s], mid[s1]);
+    if (shoulder) {
+      tri(mid[s], t[s], mid[s1]);
+      tri(mid[s1], t[s], t[s1]);
+    }
     tri(t[s], apex, t[s1]);
     if (cap) tri([0, 0, 0], b[s], b[s1]);
   }
@@ -624,21 +674,43 @@ function ribbon(points, width, segs, fold, face, opts = {}) {
   return stitch(rings, { open: true, flat: true, tag: opts.tag });
 }
 
-// Cheaper canopy clump than lumpy(): a displaced dodecahedron, 36 triangles
-// instead of 80. Trees draw out to 650 m and a lush view can hold a couple
-// thousand, so only the main clump of a tree gets the rounder icosphere.
-function puff(rng, radius, amount, stretch) {
-  const g = new THREE.DodecahedronGeometry(radius, 0);
-  const noise = createNoise3D(rng.seed());
-  const p = g.attributes.position;
-  const f = rng.range(0.8, 1.6) / radius;
-  for (let i = 0; i < p.count; i++) {
-    _p.fromBufferAttribute(p, i);
-    _p.multiplyScalar(1 + noise(_p.x * f, _p.y * f, _p.z * f) * amount);
-    if (stretch) _p.multiply(stretch);
-    p.setXYZ(i, _p.x, _p.y, _p.z);
-  }
+function foldedLeaf(base, tip, width, face = UP) {
+  const dir = tip.clone().sub(base).normalize();
+  const side = new THREE.Vector3().crossVectors(dir, face).normalize();
+  const mid = base.clone().lerp(tip, 0.46).addScaledVector(face, width * 0.2);
+  const left = mid.clone().addScaledVector(side, -width);
+  const right = mid.clone().addScaledVector(side, width);
+  mid.addScaledVector(face, width * 0.42);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute([base, left, mid, right, tip].flatMap((p) => p.toArray()), 3));
+  g.setAttribute('aT', new THREE.Float32BufferAttribute([0, 0.5, 0.5, 0.5, 1], 1));
+  g.setIndex([0, 1, 2, 0, 2, 3, 1, 4, 2, 2, 4, 3]);
   g.computeVertexNormals();
+  return g;
+}
+
+// Sixty triangles per lobe, with a rounder 96-triangle center for big crowns.
+function crown(rng, radius, stretch, main = false) {
+  const sides = main ? 12 : 10;
+  const tiers = main ? 4 : 3;
+  const phase = rng.range(0, Math.PI * 2);
+  const lean = new THREE.Vector3(rng.range(-0.12, 0.12), 0, rng.range(-0.12, 0.12));
+  const rings = [new THREE.Vector3(lean.x * radius, radius, lean.z * radius)];
+  for (let i = 1; i <= tiers; i++) {
+    const phi = i / (tiers + 1) * Math.PI;
+    const ring = [];
+    for (let j = 0; j < sides; j++) {
+      const a = j / sides * Math.PI * 2;
+      const scallop = 1 + 0.14 * Math.cos(a * (sides / 2) + phase) * Math.sin(phi) + 0.055 * Math.sin(a * 3 - phi + phase);
+      const r = radius * Math.sin(phi) * scallop;
+      const y = radius * (Math.cos(phi) + 0.075 * Math.sin(a * 3 + phase) * Math.sin(phi));
+      ring.push(new THREE.Vector3(Math.cos(a) * r + lean.x * radius * Math.cos(phi), y, Math.sin(a) * r + lean.z * radius * Math.cos(phi)));
+    }
+    rings.push(ring);
+  }
+  rings.push(new THREE.Vector3(0, -radius * 0.82, 0));
+  const g = stitch(rings, { flat: true });
+  if (stretch) g.scale(stretch.x, stretch.y, stretch.z);
   return g;
 }
 
@@ -721,7 +793,10 @@ function stem(rng, h, r0, r1, bend, opts = {}) {
   }
   const curve = new THREE.CatmullRomCurve3(pts);
   const flare = opts.flare ?? 0.8;
-  const geo = limb(curve, (t) => (r0 + (r1 - r0) * t) * (1 + flare * Math.max(0, 1 - t / 0.2) ** 2), opts.sides || 6, opts.segs || 7, { ease: 1.5, tip: opts.tip ?? 0.6, tag: opts.tag });
+  const geo = limb(curve, (t) => (r0 + (r1 - r0) * t) * (1 + flare * Math.max(0, 1 - t / 0.2) ** 2), opts.sides || 6, opts.segs || 7, {
+    ease: 1.5, tip: opts.tip ?? 0.6, tag: opts.tag,
+    shape: (t, j) => 1 + 0.085 * Math.cos(j * 2.4 + t * 1.6) * (1 - t * 0.5),
+  });
   return { geo, curve, top: pts[4] };
 }
 
@@ -753,15 +828,18 @@ function treeExtras(rng, sp, P, blobs) {
     if (st) off.multiply(st);
     const p = pos.clone().add(off);
     const size = fruit ? rng.range(0.15, 0.2) : rng.range(0.2, 0.3);
-    // small enough that 8 triangles with round normals pass for a ball
-    const g = new THREE.OctahedronGeometry(size, 0);
-    if (fruit) {
-      g.scale(1, 1.3, 1);
-      p.y -= size * 0.7;
+    if (!fruit) {
+      const facing = off.clone().normalize();
+      const g = P.add(bloomDisc(size, 5, 0.5, 0.3, size * 0.25, 1), col, { matrix: qmat(p, aim(facing, i)), sway: 1 });
+      ramp(g, [[0, tint(col, 1.5), 0.5], [1, col, 0.15]]);
+      continue;
     }
+    const g = new THREE.OctahedronGeometry(size, 0);
+    g.scale(1, 1.3, 1);
+    p.y -= size * 0.7;
     g.translate(p.x, p.y, p.z);
     bendNormals(g, p, 0.8);
-    P.add(g, fruit ? col : tint(col, 1.1), { glow: fruit ? 0.9 : 0.3, sway: 1 });
+    P.add(g, col, { glow: 0.9, sway: 1 });
   }
 }
 
@@ -794,9 +872,9 @@ function treeBroad(rng, sp, P, col, leafCol) {
     blobs.push([C.clone().add(new THREE.Vector3(Math.cos(a) * R * 0.4, R * 0.05, Math.sin(a) * R * 0.4)), R * rng.range(0.45, 0.58)]);
   }
   blobs.forEach(([pos, r], i) => {
-    const g = i === nb ? lumpy(rng, r, 1, 0.12) : puff(rng, r, 0.12);
+    const g = crown(rng, r, null, i === nb);
     g.translate(pos.x, pos.y, pos.z);
-    bendNormals(g, C, 0.65);
+    bendNormals(g, pos, 0.65);
     const c = i % 2 ? alt : leafCol;
     foliage(P.add(g, c, { sway: 1 }), C, R, R * 0.8, c);
   });
@@ -887,9 +965,9 @@ function treeUmbrella(rng, sp, P, col, leafCol) {
   }
   const sq = new THREE.Vector3(1, flat * 1.6, 1);
   pads.forEach(([pos, r], i) => {
-    const g = i ? puff(rng, r, 0.1, st) : lumpy(rng, r, 1, 0.1, st);
+    const g = crown(rng, r, st, i === 0);
     g.translate(pos.x, pos.y, pos.z);
-    bendNormals(g, C, 0.7, sq);
+    bendNormals(g, pos, 0.7, sq);
     foliage(P.add(g, leafCol, { sway: 1 }), C, R, R * flat * 1.6, leafCol);
   });
   treeExtras(rng, sp, P, pads);
@@ -908,7 +986,7 @@ function treeWeeping(rng, sp, P, col, leafCol) {
   const C = s.top.clone();
   C.y += R * 0.2;
   const H = C.y + R * sq;
-  const dome = lumpy(rng, R, 1, 0.1, st);
+  const dome = crown(rng, R, st, true);
   dome.translate(C.x, C.y, C.z);
   bendNormals(dome, C, 0.7, st);
   foliage(P.add(dome, leafCol, { sway: 1 }), C, R, R * sq, leafCol);
@@ -982,7 +1060,26 @@ function palmOne(rng, P, o) {
     const droop = o.droop * rng.range(0.75, 1.2);
     const d = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
     const fp = [0, 0.25, 0.5, 0.75, 1].map((t) => top.clone().addScaledVector(d, len * t + 0.1).add(new THREE.Vector3(0, lift * t - droop * t * t + 0.1, 0)));
-    // every other ring is narrower, which gives the edges a leaflet zigzag
+    if (o.serr > 0.2) {
+      const curve = new THREE.CatmullRomCurve3(fp);
+      curve.arcLengthDivisions = 20;
+      const rib = P.add(ribbon(curve, (t) => 0.1 * (1 - t) + 0.018, 3, 0.35, UP, { tag: true }), o.leafCol, { sway: 1.25 });
+      paint(rib, (c, x, y, z, ny, u) => { c.copy(fDark).lerp(fLight, 0.25 + u * 0.55); });
+      const side = new THREE.Vector3(-d.z, 0, d.x);
+      const pairs = o.segs > 7 ? 6 : 5;
+      for (let k = 0; k < pairs; k++) {
+        const t = 0.15 + k / pairs * 0.75;
+        for (const sign of [-1, 1]) {
+          const at = curve.getPointAt(Math.min(0.96, t + sign * 0.015));
+          const reach = o.width * 1.02 * Math.sin(Math.PI * (0.12 + t * 0.83)) ** 0.8;
+          const tip = at.clone().addScaledVector(side, sign * reach).addScaledVector(d, len * (0.14 + 0.065 * t));
+          tip.y -= reach * (0.18 + t * 0.32);
+          const part = P.add(foldedLeaf(at, tip, reach * 0.34), o.leafCol, { sway: 1.3 });
+          ramp(part, [[0, fDark], [0.45, o.leafCol], [1, fLight]]);
+        }
+      }
+      continue;
+    }
     const g = ribbon(fp, (t, j) => o.width * Math.sin(Math.PI * Math.min(1, 0.1 + t * 0.95)) ** 0.8 * (j % 2 ? 1 : 1 - o.serr), o.segs, 0.35, UP, { tag: true });
     bendNormals(g, top.clone().add(new THREE.Vector3(0, -1, 0)), 0.25);
     paint(P.add(g, o.leafCol, { sway: 1.3 }), (c, x, y, z, ny, u, v) => {
@@ -1128,14 +1225,18 @@ function fungus(rng, P, o) {
   const T = s.curve.getTangentAt(1);
   const M = mat(s.top.clone().addScaledVector(T, -0.1), null, 1);
   M.multiply(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(UP, UP.clone().lerp(T, 0.6).normalize())));
-  const wavy = style === 0 || style === 3 ? rng.range(0, 0.06) : 0;
-  const cap = lathe(prof, 14, { tag: true, rot: rng.range(0, 1), shape: (i, j) => (i >= 3 && i <= 4 ? 1 + wavy * Math.sin(j * 2.1) : 1) });
+  const wavy = style === 0 || style === 3 ? rng.range(0.065, 0.11) : 0.035;
+  const rotation = rng.range(0, 1);
+  const cap = lathe(prof, 16, { tag: true, rot: rotation, shape: (i, j) => {
+    const a = j / 16 * Math.PI * 2 + rotation;
+    return 1 + Math.sin(a * 5 + 0.4) * wavy * (i >= 3 && i <= 5 ? 1 : 0.35);
+  } });
   cap.applyMatrix4(M);
   const c0 = tint(o.capCol, 0.72, COOL, 0.05);
   const c1 = tint(o.capCol2, 1.02, WARM, 0.08);
   const under = tint(o.glowCol, 0.8, COOL, 0.1).lerp(o.stalkCol, 0.2);
   const bands = o.bands;
-  paint(add(cap, o.capCol, { sway: 0.3 }), (c, x, y, z, ny, u) => {
+  paint(add(cap, o.capCol, { sway: 0.3 }), (c, x, y, z, ny, u, v) => {
     if (u > 0.7) {
       c.copy(under);
       return o.glow;
@@ -1147,19 +1248,21 @@ function fungus(rng, P, o) {
     }
     const t = u / 0.667;
     c.copy(c0).lerp(c1, bands ? Math.round(u * 6) % 2 : t);
-    c.multiplyScalar(0.85 + 0.15 * smoothstep(-0.5, 1, ny));
+    c.multiplyScalar((0.85 + 0.15 * smoothstep(-0.5, 1, ny)) * (0.94 + 0.06 * Math.cos(v * Math.PI * 16)));
     return 0;
   });
   // gills: one fin per wedge, from the stalk out to the rim
   const [ri, yi] = prof[6];
   const [ro, yo] = prof[5];
   const gills = [];
-  const nG = 18;
+  const nG = 20;
   for (let j = 0; j < nG; j++) {
     const a = (j / nG) * Math.PI * 2;
     const x = Math.cos(a), z = Math.sin(a);
-    const rm = ri + (ro - ri) * 0.55, ym = yi + (yo - yi) * 0.55 - R * 0.12;
-    gills.push(x * ri, yi - 0.02, z * ri, x * ro * 0.97, yo - 0.02, z * ro * 0.97, x * rm, ym, z * rm);
+    const scallop = 1 + Math.sin(a * 5 + 0.4) * wavy;
+    const rm = ri + (ro - ri) * 0.55, ym = yi + (yo - yi) * 0.55 - R * (j % 2 ? 0.07 : 0.13);
+    const edge = ro * 0.97 * scallop;
+    gills.push(x * ri, yi - 0.02, z * ri, x * edge, yo - 0.02, z * edge, x * rm, ym, z * rm);
   }
   const gg = new THREE.BufferGeometry();
   gg.setAttribute('position', new THREE.Float32BufferAttribute(gills, 3));
@@ -1426,9 +1529,9 @@ const BUILDERS = {
       });
       if (k === 2 && !flat) puffs.push([Cc.clone().add(new THREE.Vector3(0, 0.45, 0)), rng.range(0.7, 0.9)]);
       puffs.forEach(([pos, r], i) => {
-        const g = i ? puff(rng, r, 0.2, st) : lumpy(rng, r, 1, 0.2, st);
+        const g = crown(rng, r, st, i === 0);
         g.translate(pos.x, pos.y, pos.z);
-        bendNormals(g, Cc, 0.6, flat ? new THREE.Vector3(1, 0.5, 1) : null);
+        bendNormals(g, pos, 0.6, flat ? new THREE.Vector3(1, 0.5, 1) : null);
         foliage(P.add(g, leafCol, { sway: 1 }), Cc, R, flat ? R * 0.5 : R, leafCol);
       });
     }
@@ -1635,6 +1738,13 @@ const BUILDERS = {
       // clumps low in the dome are darker, they sit in the bush's own shade
       const shade = 0.85 + 0.15 * Math.min(1, e);
       ramp(g, [[0, dark.clone().multiplyScalar(shade * 1.2), 0], [1, jitter(rng, leaf[i % 3]).lerp(light, 0.5).multiplyScalar(shade), 0]]);
+      for (let j = 0; j < 2; j++) {
+        const d = new THREE.Vector3(Math.cos(a + j * 1.4), 0.38, Math.sin(a + j * 1.4)).normalize();
+        const at = c.clone().addScaledVector(d, r * 0.6);
+        const tip = c.clone().addScaledVector(d, r * 1.6);
+        tip.y += r * 0.2;
+        ramp(P.add(foldedLeaf(at, tip, r * 0.22), leaf[i % 3]), [[0, dark], [0.45, leaf[i % 3]], [1, light]]);
+      }
     }
     const berries = rng.int(4, 6);
     const bc = glow ? sp.palette.glow : jitter(rng, leaf[2]).lerp(new THREE.Color('#fff4e0'), 0.6);
@@ -1870,7 +1980,17 @@ const BUILDERS = {
         const inner = P.add(bloomDisc(R * 0.58, m, fat, notch, cup * 1.4, 1), petal2, { matrix: qmat(end.clone().addScaledVector(facing, 0.012), q.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, Math.PI / m))) });
         ramp(inner, [[0, heart, 2], [1, petal2, 0.7]]);
       }
+      const calyx = lathe([[R * 0.14, 0], [R * 0.48, -R * 0.06], [R * 0.1, -R * 0.22]], m, { shape: (row, j) => row === 1 && j % 2 ? 0.7 : 1 });
+      P.add(calyx, tint(stemCol, 0.8), { matrix: qmat(end, q), sway: 0.8 });
       P.add(style === 1 ? new THREE.OctahedronGeometry(R * 0.24, 0) : new THREE.IcosahedronGeometry(R * 0.24, 0), heart, { matrix: qmat(end.clone().addScaledVector(facing, R * 0.12), q, new THREE.Vector3(1, 0.7, 1)), glow: 2.5 });
+      if (style === 0 || style === 2) {
+        for (let j = 0; j < m; j++) {
+          const a = j / m * Math.PI * 2;
+          const p = new THREE.Vector3(Math.cos(a) * R * 0.2, R * 0.28, Math.sin(a) * R * 0.2).applyQuaternion(q).add(end);
+          const pollen = new THREE.OctahedronGeometry(R * 0.055);
+          P.add(pollen, heart, { matrix: qmat(p, q, new THREE.Vector3(1, 2.4, 1)), glow: 1.8 });
+        }
+      }
     }
     const leaves = style === 1 ? 3 : 2;
     for (let i = 0; i < leaves; i++) {
@@ -1912,7 +2032,16 @@ const BUILDERS = {
       const dome = style === 3 ? [[r * 0.95, capH * 0.35], [r * 0.85, capH * 0.8], [r * 0.45, capH * 1.1], [0, capH * 1.2]] : [[r, capH * 0.28], [r * 0.62, capH * 0.82], [0, capH]];
       const under = style === 3 ? [[sr * 1.2, -capH * 0.1, 0.25]] : big ? [[sr * 1.15, -capH * 0.04], [r * 0.8, capH * 0.02, 0.18], [r * 0.97, -capH * 0.05, 0.1]] : [[sr * 1.15, -capH * 0.04], [r * 0.97, -capH * 0.05, 0.14]];
       const N = big ? (style === 2 ? 8 : 9) : 6;
-      const cap = P.add(ringsGeo([...under, ...dome], N), capCol, { matrix: mat(topP) });
+      const capGeo = ringsGeo([...under, ...dome], N);
+      const capPos = capGeo.attributes.position;
+      for (let j = 0; j < capPos.count; j++) {
+        const x = capPos.getX(j), z = capPos.getZ(j);
+        const radial = Math.hypot(x, z) / r;
+        const wave = Math.sin(Math.atan2(z, x) * 3 + 0.5);
+        capPos.setXYZ(j, x * (1 + 0.055 * wave), capPos.getY(j) + wave * r * 0.035 * radial, z * (1 + 0.055 * wave));
+      }
+      capGeo.computeVertexNormals();
+      const cap = P.add(capGeo, capCol, { matrix: mat(topP) });
       const glowUnder = style === 3 ? 0.4 * g0 : g0;
       // gills glow brightest by the stalk, the rolled lip keeps a faint glow so
       // the cap edge still reads at night from the side
@@ -2300,7 +2429,7 @@ const BUILDERS = {
     const r = rng.range(1.5, 2.6);
     const sx = rng.range(1.0, 1.35), sy = rng.range(0.65, 0.95), sz = rng.range(0.9, 1.2);
     const parts = [];
-    const add = (pts, pos, rot) => parts.push(P.add(new ConvexGeometry(pts), lo, { matrix: mat(pos, rot), sway: 0 }));
+    const add = (pts, pos, rot) => parts.push(P.add(pts.length >= 20 ? chippedHull(pts, 0.12) : new ConvexGeometry(pts), lo, { matrix: mat(pos, rot), sway: 0 }));
     const top = (pts) => pts.reduce((m, p) => Math.max(m, p.y), 0);
     // half sunk into the ground
     const sunk = ground - r * sy * 0.22;
@@ -2386,10 +2515,19 @@ const BUILDERS = {
     const style = sp.style;
     const ground = sp.sink ?? 0.25;
     const col = new THREE.Color(sp.crystalColor);
-    const deep = col.clone().multiplyScalar(0.78);
-    const pale = col.clone().lerp(new THREE.Color('#ffffff'), 0.18);
+    const deep = col.clone().multiplyScalar(0.58);
+    const pale = col.clone().lerp(new THREE.Color('#ffffff'), 0.27);
     // glow builds toward the tips so the node reads from a distance and at night
-    const shine = (g) => ramp(g, [[0, deep, 1.0], [0.5, col, 1.2], [1, pale, 1.6]]);
+    const shine = (g) => {
+      ramp(g, [[0, deep, 0.7], [0.5, col, 1.0], [1, pale, 1.6]]);
+      const normal = g.attributes.normal;
+      const color = g.attributes.color;
+      for (let i = 0; i < normal.count; i++) {
+        const facet = 0.84 + Math.max(0, normal.getY(i)) * 0.12 + normal.getX(i) * 0.07 - normal.getZ(i) * 0.035;
+        color.setXYZ(i, color.getX(i) * facet, color.getY(i) * facet, color.getZ(i) * facet);
+      }
+      return g;
+    };
     // the rock the crystals grow out of
     const base = P.add(hullRock(rng, 0.55, 1.3, 0.55, 1.15, 2, 18, 0.3), pal.cliff, { matrix: mat(new THREE.Vector3(0, ground - 0.12, 0), new THREE.Euler(0, rng.range(0, 6.3), 0)), sway: 0 });
     paintChunks([base], { lo: jitter(rng, pal.cliff, 0.08).multiplyScalar(0.8), hi: jitter(rng, pal.high, 0.08), cover: rockCover(sp), ao: 0.3 });

@@ -1,7 +1,17 @@
-@import '@fontsource/rajdhani/latin-400.css';
-@import '@fontsource/rajdhani/latin-500.css';
-@import '@fontsource/rajdhani/latin-600.css';
-@import '@fontsource/rajdhani/latin-700.css';
+/* Same fonts as the orrery. Inter for anything you read, Jost for names,
+   titles, labels and big figures. Both are variable, one file each. */
+@font-face {
+  font-family: 'Inter';
+  src: url('./fonts/inter.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Jost';
+  src: url('./fonts/jost.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
 
 :root {
   --ui: #cfe9ff;
@@ -12,6 +22,8 @@
   --warm: #ffb45e;
   --danger: #ff5a48;
   --good: #7dffb0;
+  --font: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --display: 'Jost', var(--font);
 }
 
 html,
@@ -21,9 +33,12 @@ body {
   overflow: hidden;
   background: #000;
   color: var(--ui);
-  font-family: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
   user-select: none;
   -webkit-user-select: none;
+  /* no pull to refresh or rubber banding on phones */
+  overscroll-behavior: none;
 }
 
 #app canvas {
@@ -76,6 +91,27 @@ body {
   zoom: var(--z);
 }
 
+.loc-system,
+.loc-body,
+.obj-title,
+.ti-name,
+.prompt,
+kbd,
+.photo-hint b,
+.photo-status,
+.banner,
+.center-msg,
+.flight-mode,
+.readout,
+.suit-label,
+.feed-item,
+.marker-label,
+.dcard-kicker,
+.dcard-name,
+.dcard-tags {
+  font-family: var(--display);
+}
+
 /* HUD text sits on the 3D view, so the dim color is a bit stronger than in the
    menus and the shadow is wide enough to hold up against bright sky and snow */
 .hud {
@@ -93,21 +129,22 @@ body {
   max-width: min(380px, calc(100vw / var(--z) - 56px));
 }
 .loc-system {
-  font-size: 13px;
-  letter-spacing: 0.22em;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--ui-dim);
 }
 .loc-body {
   font-size: 26px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  line-height: 1.1;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
 }
 .loc-sub {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ui-dim);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.01em;
 }
 .objective {
   margin-top: 16px;
@@ -116,15 +153,15 @@ body {
   background: linear-gradient(90deg, rgba(20, 14, 6, 0.45), rgba(0, 0, 0, 0));
 }
 .obj-title {
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--warm);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 .obj-text {
-  font-size: 15px;
-  line-height: 1.35;
+  font-size: 13.5px;
+  line-height: 1.45;
   color: #f3e7d6;
 }
 .obj-text b {
@@ -247,13 +284,13 @@ body {
   opacity: 1;
 }
 .ti-name {
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 500;
 }
 .ti-sub {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--ui-dim);
-  letter-spacing: 0.05em;
+  letter-spacing: 0.02em;
 }
 .ti-bar {
   margin-top: 4px;
@@ -265,10 +302,11 @@ body {
   left: 50%;
   top: 62%;
   transform: translateX(-50%);
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 500;
   letter-spacing: 0.05em;
   padding: 6px 16px;
+  border-radius: 3px;
   background: var(--ui-panel);
   border: 1px solid var(--ui-line);
   opacity: 0;
@@ -282,17 +320,23 @@ body {
 .prompt.show {
   opacity: 1;
 }
+/* the chase camera puts the ship right where the foot prompt goes, so in
+   the ship it sits just above the flight readouts */
+.hud[data-mode='ship'] .prompt {
+  top: auto;
+  bottom: 150px;
+}
 kbd {
   display: inline-block;
   min-width: 18px;
   padding: 0 6px;
   margin-right: 6px;
   font-family: inherit;
-  font-weight: 700;
+  font-weight: 600;
   font-size: 0.9em;
   color: #0b1522;
   background: var(--ui);
-  border-radius: 3px;
+  border-radius: 2px;
   text-align: center;
   text-shadow: none;
 }
@@ -302,8 +346,8 @@ kbd {
   right: 28px;
   top: 24px;
   max-width: 300px;
-  font-size: 14px;
-  line-height: 1.7;
+  font-size: 13px;
+  line-height: 1.8;
   color: var(--ui-dim);
   text-align: right;
   opacity: 0;
@@ -311,6 +355,10 @@ kbd {
 }
 .hint.show {
   opacity: 1;
+}
+/* the discovery card shows up in the same corner, the hint comes back after */
+.dcard.show ~ .hint {
+  opacity: 0;
 }
 
 .photo-hint {
@@ -322,12 +370,13 @@ kbd {
   max-width: calc(100vw - 40px);
   box-sizing: border-box;
   padding: 6px 14px;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.9;
   text-align: center;
   color: var(--ui-dim);
   background: var(--ui-panel);
   border: 1px solid var(--ui-line);
+  border-radius: 3px;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
   opacity: 0;
   transition: opacity 0.6s;
@@ -350,13 +399,14 @@ kbd {
   top: 36px;
   transform: translateX(-50%);
   padding: 4px 16px;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--ui);
   background: var(--ui-panel);
   border: 1px solid var(--ui-line);
+  border-radius: 3px;
   opacity: 0;
   transition: opacity 0.3s;
 }
@@ -396,13 +446,14 @@ kbd {
   }
 }
 .banner-title {
-  font-size: 34px;
-  font-weight: 600;
+  font-size: 32px;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.28em;
 }
 .banner-sub {
-  font-size: 17px;
+  font-size: 14px;
+  font-weight: 500;
   letter-spacing: 0.3em;
   text-transform: uppercase;
   color: var(--accent);
@@ -414,9 +465,9 @@ kbd {
   left: 50%;
   top: 38%;
   transform: translateX(-50%);
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0.25em;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--warm);
   opacity: 0;
@@ -452,8 +503,9 @@ kbd {
   text-align: center;
 }
 .flight-mode {
-  font-size: 13px;
-  letter-spacing: 0.3em;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.28em;
   text-transform: uppercase;
   color: var(--accent);
 }
@@ -463,8 +515,8 @@ kbd {
 }
 .flight-sub {
   min-height: 16px;
-  font-size: 13px;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  letter-spacing: 0.02em;
   color: var(--ui-dim);
 }
 .flight.orbiting .flight-mode {
@@ -481,11 +533,13 @@ kbd {
 }
 .readout-val {
   font-size: 30px;
-  font-weight: 600;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
 }
 .readout-label {
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 500;
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--ui-dim);
@@ -538,8 +592,9 @@ kbd {
 }
 .suit-label {
   width: 86px;
-  font-size: 13px;
-  letter-spacing: 0.12em;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--ui-dim);
   text-align: right;
@@ -573,8 +628,8 @@ kbd {
   gap: 4px;
 }
 .feed-item {
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 500;
   padding: 3px 12px;
   border-right: 3px solid var(--c);
   background: linear-gradient(270deg, rgba(10, 18, 30, 0.6), rgba(0, 0, 0, 0));
@@ -642,14 +697,14 @@ kbd {
   left: 12px;
   top: -12px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--mc);
 }
 .marker-sub {
   position: absolute;
   left: 12px;
   top: 3px;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--ui-dim);
 }
 .marker.apsis .marker-icon {
@@ -687,7 +742,7 @@ kbd {
   padding: 14px 16px 12px;
   background: linear-gradient(180deg, rgba(10, 20, 34, 0.82), rgba(8, 14, 24, 0.7));
   border: 1px solid var(--ui-line);
-  border-radius: 10px;
+  border-radius: 3px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
   opacity: 0;
   transform: translateX(24px);
@@ -698,9 +753,9 @@ kbd {
   transform: none;
 }
 .dcard-kicker {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.22em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--warm);
   margin-bottom: 10px;
@@ -720,27 +775,38 @@ kbd {
 }
 .dcard-name {
   font-size: 22px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.05;
 }
 .dcard-type {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--accent);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.02em;
 }
 .dcard-rows div {
   display: flex;
-  justify-content: space-between;
-  font-size: 15px;
-  padding: 3px 0;
-  border-top: 1px solid rgba(150, 215, 255, 0.12);
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  padding: 2px 0;
+}
+.dcard-rows div::after {
+  content: '';
+  order: 1;
+  flex: 1;
+  min-width: 12px;
+  border-bottom: 1px dotted rgba(150, 215, 255, 0.22);
+  transform: translateY(-3px);
 }
 .dcard-rows span {
+  flex: none;
   color: var(--ui-dim);
 }
 .dcard-rows b {
-  font-weight: 600;
+  order: 2;
+  font-weight: 500;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 .dcard-tags {
   display: flex;
@@ -750,18 +816,18 @@ kbd {
 }
 .dcard-tags i {
   font-style: normal;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   padding: 2px 8px;
-  border-radius: 20px;
+  border-radius: 2px;
   border: 1px solid var(--ui-line);
   color: var(--ui);
 }
 
 .loc-route {
-  font-size: 14px;
+  font-size: 13px;
   color: #ffd28a;
   margin-top: 2px;
 }
@@ -799,5 +865,79 @@ kbd {
   }
   .dcard-head {
     margin-bottom: 0;
+  }
+}
+
+/* Phones in landscape and other short or narrow windows. The HUD is laid out
+   for 1080p and would cover a third of a 390 px tall screen. */
+@media (max-height: 500px), (max-width: 600px) {
+  .hud-tl {
+    left: 16px;
+    top: 12px;
+  }
+  .loc-system {
+    font-size: 10.5px;
+  }
+  .loc-body {
+    font-size: 20px;
+  }
+  .loc-sub,
+  .loc-route {
+    font-size: 12px;
+  }
+  .objective {
+    margin-top: 8px;
+    padding: 5px 10px 6px;
+  }
+  .obj-title {
+    font-size: 11.5px;
+  }
+  .obj-text {
+    font-size: 12.5px;
+    line-height: 1.35;
+  }
+  .hud-bottom {
+    gap: 24px;
+  }
+  .flight {
+    width: 210px;
+  }
+  .readout {
+    min-width: 90px;
+  }
+  .readout-val {
+    font-size: 24px;
+  }
+  .suit {
+    width: 220px;
+  }
+  .suit-label {
+    width: 62px;
+    font-size: 10.5px;
+  }
+  .banner {
+    top: 20%;
+  }
+  .banner-title {
+    font-size: 24px;
+  }
+  .banner-sub {
+    font-size: 13px;
+  }
+  .center-msg {
+    font-size: 13.5px;
+    letter-spacing: 0.16em;
+  }
+  .feed-item {
+    font-size: 13.5px;
+  }
+  .ti-name {
+    font-size: 15px;
+  }
+  .marker-label {
+    font-size: 12px;
+  }
+  .marker-sub {
+    font-size: 11px;
   }
 }

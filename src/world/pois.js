@@ -4,6 +4,7 @@ import { faceDir, forEachCellNear } from '../gen/terrain.js';
 import { patchStandard } from '../render/materials.js';
 import { LAYER_POST } from '../render/pipeline.js';
 import { RESOURCES } from '../game/resources.js';
+import { device } from '../core/device.js';
 import { surfaceNormal, findLand } from './planet.js';
 import { buildWonder, wonderKinds, wonderName, WONDERS } from './wonders.js';
 
@@ -548,12 +549,12 @@ export class PoiManager {
 
   describe(poi) {
     const info = POI_INFO[poi.type];
-    if (poi.type === 'wonder') return { name: poi.name, sub: this.isUsed(poi) ? 'Already searched' : 'Press E to search' };
+    if (poi.type === 'wonder') return { name: poi.name, sub: this.isUsed(poi) ? 'Already searched' : (device.touch ? 'Walk up to search it' : 'Press E to search') };
     if (poi.type === 'deposit') {
       const left = poi.amount - (this.record.mined[poi.id] || 0);
       return { name: `${RESOURCES[poi.res].name} Deposit`, sub: `${left} units remaining` };
     }
-    return { name: info.label, sub: this.isUsed(poi) ? 'Already explored' : 'Press E to interact' };
+    return { name: info.label, sub: this.isUsed(poi) ? 'Already explored' : (device.touch ? 'Walk up to interact' : 'Press E to interact') };
   }
 
   mine(poi, dt, power) {

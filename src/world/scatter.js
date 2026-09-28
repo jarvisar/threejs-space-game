@@ -4,6 +4,7 @@ import { placementFields } from '../gen/flora.js';
 import { buildSpeciesGeometry, materialKind, simplifyFlora } from './floraGeometry.js';
 import { patchStandard } from '../render/materials.js';
 import { RESOURCES } from '../game/resources.js';
+import { detail } from '../render/quality.js';
 
 const _v = new THREE.Vector3();
 const _m = new THREE.Matrix4();
@@ -246,6 +247,8 @@ export class Scatter {
     this.level = Math.max(3, Math.round(Math.log2((R * Math.PI) / 2 / 70)));
     this.cellSize = (R * Math.PI) / 2 / (1 << this.level);
     this.cells = new Map();
+    // lower graphics presets draw flora less far out, fixed for this surface
+    this.distK = detail.scatter;
     this.removed = new Set(planet.minedSet || []);
     this.group = new THREE.Group();
     this.group.name = 'scatter';
@@ -280,9 +283,9 @@ export class Scatter {
         lod = null;
       }
       this.lods.push(lod);
-      const mat = floraMaterial(kind, sp.maxDist, far ? -1 : 0, lod ? lod.dist : 0);
+      const mat = floraMaterial(kind, sp.maxDist * this.distK, far ? -1 : 0, lod ? lod.dist : 0);
       this.slots.push(new SlotMesh(this.group, geo, mat, true));
-      this.farSlots.push(far ? new SlotMesh(this.group, far, floraMaterial(kind, sp.maxDist, 1, lod.dist), true) : null);
+      this.farSlots.push(far ? new SlotMesh(this.group, far, floraMaterial(kind, sp.maxDist * this.distK, 1, lod.dist), true) : null);
       // small near-player copy that only draws into the shadow map. three
       // tests shadow casters against the main camera's layers, so instead of
       // a separate layer the instance count is zeroed for the main pass.
@@ -348,7 +351,7 @@ export class Scatter {
     this.dataChanged = false;
 
     const wanted = [];
-    forEachCellNear(this.planet.radius, this.level, _v.copy(local).normalize(), FAR_RADIUS, (face, x, y, dist) => wanted.push({ face, x, y, dist }));
+    forEachCellNear(this.planet.radius, this.level, _v.copy(local).normalize(), FAR_RADIUS * this.distK, (face, x, y, dist) => wanted.push({ face, x, y, dist }));
     const keep = new Set();
     for (const c of wanted) {
       const k = this.key(c.face, c.x, c.y);
@@ -401,7 +404,7 @@ export class Scatter {
       for (let s = 0; s < this.species.length; s++) {
         const sp = this.species[s];
         const data = sp.big ? cell.big : cell.small;
-        const want = !!data && cell.dist <= sp.maxDist + this.cellSize;
+        const want = !!data && cell.dist <= sp.maxDist * this.distK + this.cellSize;
         const slot = this.slots[s];
         const far = this.farSlots[s];
         if (!far) {

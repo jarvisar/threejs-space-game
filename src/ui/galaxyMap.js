@@ -5,6 +5,8 @@ import { stats } from '../game/upgrades.js';
 import { RNG } from '../core/rng.js';
 import { planRoute } from '../gen/route.js';
 import { radialTexture } from '../render/textures.js';
+import { portraitFov } from '../player/cameraRig.js';
+import { device } from '../core/device.js';
 
 const starVert = /* glsl */ `
 attribute vec3 aColor;
@@ -304,6 +306,7 @@ export class GalaxyMap {
         <div><i class="ring"></i>Visited</div>
         <div class="gmap-keys"><kbd>Drag</kbd>rotate <kbd>Wheel</kbd>zoom <kbd>C</kbd>center <kbd>T</kbd>signal <button class="gmap-close"><kbd>G</kbd>close</button></div>
       </div>
+      <div class="gmap-touch"><button class="btn small" data-map="here">Center</button><button class="btn small" data-map="signal">Signal</button><button class="btn small primary" data-map="close">Close</button></div>
       <div class="gmap-info"></div>
       <div class="gmap-hover"></div>`;
     root.appendChild(ui);
@@ -321,28 +324,69 @@ export class GalaxyMap {
       if (b.dataset.act === 'warp') this.game.requestWarp(this.nextStop());
       if (b.dataset.act === 'core') this.game.requestCoreJump();
     });
+    ui.querySelector('.gmap-touch').addEventListener('click', (e) => {
+      const act = e.target.dataset.map;
+      if (act === 'here') this.focusStar(this.game.state.systemIndex);
+      if (act === 'signal') this.findSignal();
+      if (act === 'close') this.game.closeMenus();
+    });
   }
 
+  // Pointer events so touch works too. One finger or the mouse drags to
+  // rotate and taps to pick, two fingers pinch to zoom.
   bindInput() {
     const canvas = this.game.renderer.domElement;
     let lx = 0, ly = 0, moved = 0;
-    canvas.addEventListener('mousedown', (e) => {
+    const touches = new Map();
+    let pinchD = 0;
+    const spread = () => {
+      const [a, b] = [...touches.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+    canvas.addEventListener('pointerdown', (e) => {
       if (!this.open) return;
+      if (e.pointerType !== 'mouse') {
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (touches.size === 2) {
+          pinchD = spread();
+          // a pinch never counts as a tap
+          moved = 99;
+        }
+        if (touches.size > 1) return;
+      }
       this.dragging = true;
       moved = 0;
       lx = e.clientX;
       ly = e.clientY;
     });
-    window.addEventListener('mouseup', (e) => {
+    const up = (e) => {
       if (!this.open) return;
-      if (this.dragging && moved < 5 && e.target === canvas) {
-        const i = this.pick(e.clientX, e.clientY);
+      const touch = e.pointerType !== 'mouse';
+      if (touch) touches.delete(e.pointerId);
+      if (this.dragging && moved < (touch ? 10 : 5) && e.target === canvas && e.type === 'pointerup') {
+        const i = this.pick(e.clientX, e.clientY, touch ? 28 : 14);
         if (i >= 0) this.select(i);
       }
-      this.dragging = false;
-    });
-    window.addEventListener('mousemove', (e) => {
+      if (touches.size === 1) {
+        // end of a pinch, keep rotating from where the other finger is now
+        const [p] = touches.values();
+        lx = p.x;
+        ly = p.y;
+      } else if (!touches.size) this.dragging = false;
+    };
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    window.addEventListener('pointermove', (e) => {
       if (!this.open) return;
+      if (touches.has(e.pointerId)) {
+        touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (touches.size === 2) {
+          const d = spread();
+          this.goalDist = Math.max(25, Math.min(3200, (this.goalDist * pinchD) / Math.max(1, d)));
+          pinchD = d;
+          return;
+        }
+      }
       if (this.dragging) {
         const dx = e.clientX - lx, dy = e.clientY - ly;
         moved += Math.abs(dx) + Math.abs(dy);
@@ -351,7 +395,7 @@ export class GalaxyMap {
         this.yaw -= dx * 0.005;
         this.pitch = Math.max(0.05, Math.min(1.5, this.pitch + dy * 0.005));
         this.mouse = null;
-      } else {
+      } else if (e.pointerType === 'mouse') {
         // picking tests every star, so it runs once per frame at most
         this.mouse = { x: e.clientX, y: e.clientY, over: e.target === canvas };
       }
@@ -363,14 +407,16 @@ export class GalaxyMap {
     window.addEventListener('keydown', (e) => {
       if (!this.open) return;
       if (e.code === 'KeyC') this.focusStar(this.game.state.systemIndex);
-      if (e.code === 'KeyT') {
-        const goal = this.goalStar();
-        if (goal >= 0) {
-          this.focusStar(goal);
-          this.select(goal);
-        }
-      }
+      if (e.code === 'KeyT') this.findSignal();
     });
+  }
+
+  findSignal() {
+    const goal = this.goalStar();
+    if (goal >= 0) {
+      this.focusStar(goal);
+      this.select(goal);
+    }
   }
 
   goalStar() {
@@ -452,12 +498,12 @@ export class GalaxyMap {
     }
   }
 
-  // nearest star within 14 px of a screen point, or -1
-  pick(x, y) {
+  // nearest star within r px of a screen point, or -1
+  pick(x, y, r = 14) {
     const g = this.galaxy;
     const w = this.game.viewW, h = this.game.viewH;
     const v = new THREE.Vector3();
-    let best = -1, bd = 14 * 14;
+    let best = -1, bd = r * r;
     for (let i = 0; i < g.count; i++) {
       v.set(g.positions[i * 3], g.positions[i * 3 + 1], g.positions[i * 3 + 2]).project(this.camera);
       if (v.z > 1 || v.z < -1) continue;
@@ -587,7 +633,7 @@ export class GalaxyMap {
         ${why ? `<div class="gi-why">${why}</div>` : ''}
         <button class="btn primary" data-act="warp" ${why ? 'disabled' : ''}>Warp (1 cell)</button>`;
     } else {
-      html += `<div class="gi-hint">Click a star to plot a jump. Bright stars are in range.</div>`;
+      html += `<div class="gi-hint">${device.touch ? 'Tap' : 'Click'} a star to plot a jump. Bright stars are in range.</div>`;
     }
     this.info.innerHTML = html + this.infoTail(st, here, blocker);
   }
@@ -615,6 +661,7 @@ export class GalaxyMap {
     this.camera.position.set(this.target.x + Math.sin(this.yaw) * cp * this.dist, this.target.y + Math.sin(this.pitch) * this.dist, this.target.z + Math.cos(this.yaw) * cp * this.dist);
     this.camera.lookAt(this.target);
     this.camera.aspect = this.game.viewW / this.game.viewH;
+    this.camera.fov = portraitFov(55, this.camera.aspect);
     this.camera.updateProjectionMatrix();
     this.starUniforms.uScale.value = this.game.renderer.getPixelRatio();
     const t = performance.now() / 1000;

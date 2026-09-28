@@ -5,6 +5,7 @@ import { PoiManager } from '../world/pois.js';
 import { Fauna, faunaSpecies } from '../world/fauna.js';
 import { planetSpecies } from '../gen/flora.js';
 import { RESOURCES } from './resources.js';
+import { device } from '../core/device.js';
 
 const _v = new THREE.Vector3();
 
@@ -110,7 +111,7 @@ export class Surface {
     if (target.kind === 'poi') return this.pois.describe(target.hit.poi);
     if (target.kind === 'fauna') {
       const sp = target.hit.species;
-      return { name: this.game.state.species[sp.id] ? sp.name : 'Unknown creature', sub: 'Hold Right Mouse to analyze' };
+      return { name: this.game.state.species[sp.id] ? sp.name : 'Unknown creature', sub: device.touch ? 'Hold Analyze to catalogue it' : 'Hold Right Mouse to analyze' };
     }
     const sp = target.hit.species;
     const res = RESOURCES[sp.res];

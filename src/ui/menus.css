@@ -1,3 +1,27 @@
+.panel h2,
+.title-name,
+.pause-main h4,
+.controls-panel h4,
+.journal h4,
+.ctl-grid kbd,
+.tab,
+.inv-status,
+.res-name,
+.res-count,
+.card-title,
+.upg-name,
+.j-stat,
+.j-chips i,
+.j-lore-title,
+.dlg-title,
+.gmap-title,
+.gi-name,
+.gi-goal,
+.gmap-hover b,
+.death-title {
+  font-family: var(--display);
+}
+
 .menus {
   position: absolute;
   inset: 0;
@@ -26,7 +50,8 @@
 }
 .panel {
   background: rgba(8, 15, 26, 0.86);
-  border: 1px solid var(--ui-line);
+  border: 1px solid rgba(150, 215, 255, 0.22);
+  border-radius: 3px;
   padding: 22px 26px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   max-height: calc(88vh / var(--z));
@@ -53,8 +78,9 @@
 .pause-main h4,
 .controls-panel h4 {
   margin: 0 0 6px;
-  font-size: 13px;
-  letter-spacing: 0.2em;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--warm);
 }
@@ -70,28 +96,44 @@
 }
 .panel h2 {
   margin: 0 0 6px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.3em;
   text-transform: uppercase;
   font-size: 20px;
 }
 .btn {
   font-family: inherit;
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
   color: var(--ui);
   background: rgba(20, 40, 60, 0.5);
   border: 1px solid var(--ui-line);
-  padding: 9px 18px;
+  padding: 10px 18px;
+  border-radius: 3px;
   cursor: pointer;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   transition: background 0.15s, border-color 0.15s;
 }
-.btn:hover:not([disabled]),
 .btn.on {
   background: rgba(60, 120, 160, 0.45);
   border-color: var(--accent);
+}
+/* hover only where there is one, a tap on a phone leaves it stuck on */
+@media (hover: hover) {
+  .btn:hover:not([disabled]) {
+    background: rgba(60, 120, 160, 0.45);
+    border-color: var(--accent);
+  }
+  .btn.primary:hover:not([disabled]) {
+    background: rgba(140, 80, 20, 0.55);
+    border-color: var(--warm);
+  }
+  .tab:hover,
+  .inv-close:hover,
+  .gmap-close:hover {
+    color: var(--ui);
+  }
 }
 .btn:active:not([disabled]) {
   box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45);
@@ -100,10 +142,6 @@
   border-color: var(--warm);
   color: #ffe7c7;
   background: rgba(80, 45, 10, 0.45);
-}
-.btn.primary:hover:not([disabled]) {
-  background: rgba(140, 80, 20, 0.55);
-  border-color: var(--warm);
 }
 .btn:focus-visible,
 .tab:focus-visible,
@@ -123,8 +161,8 @@
   cursor: default;
 }
 .btn.small {
-  font-size: 14px;
-  padding: 5px 14px;
+  font-size: 12.5px;
+  padding: 6px 14px;
 }
 
 /* title */
@@ -167,8 +205,8 @@
 .save-info {
   min-height: 19px;
   margin-top: 12px;
-  font-size: 14px;
-  letter-spacing: 0.08em;
+  font-size: 13px;
+  letter-spacing: 0.02em;
   color: var(--ui-dim);
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
 }
@@ -177,9 +215,9 @@
 }
 .seed-row {
   margin-top: 10px;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ui-dim);
-  letter-spacing: 0.1em;
+  letter-spacing: 0.04em;
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
   display: flex;
   gap: 10px;
@@ -189,7 +227,9 @@
 .seed-input {
   width: 90px;
   font-family: inherit;
-  font-size: 15px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  border-radius: 3px;
   background: rgba(10, 20, 30, 0.6);
   border: 1px solid var(--ui-line);
   color: var(--ui);
@@ -206,9 +246,9 @@
   left: 16px;
   right: 16px;
   text-align: center;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--ui-dim);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.03em;
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
 }
 /* on short windows the open controls panel reaches the bottom line */
@@ -233,7 +273,8 @@
   text-align: left;
   background: rgba(6, 12, 20, 0.7);
   padding: 16px 22px;
-  border: 1px solid var(--ui-line);
+  border: 1px solid rgba(150, 215, 255, 0.22);
+  border-radius: 3px;
   max-width: calc(94vw / var(--z));
   box-sizing: border-box;
 }
@@ -246,6 +287,23 @@
   padding: 0;
   background: none;
   border: none;
+}
+/* phones in landscape: buttons side by side so the settings aren't below the fold */
+@media (max-height: 500px) {
+  .pause-main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .pause-main h2,
+  .pause-main h4,
+  .pause-main .settings {
+    grid-column: 1 / -1;
+  }
+  .pause-main .btn {
+    padding: 6px 10px;
+    font-size: 13px;
+  }
 }
 @media (max-width: 760px) {
   .panel.pause {
@@ -266,7 +324,7 @@
   grid-template-columns: auto 1fr;
   gap: 5px 10px;
   align-items: center;
-  font-size: 14px;
+  font-size: 13px;
 }
 .ctl-grid kbd {
   justify-self: start;
@@ -278,7 +336,7 @@
 .settings {
   display: grid;
   gap: 8px;
-  font-size: 15px;
+  font-size: 13.5px;
 }
 .settings label {
   display: grid;
@@ -288,13 +346,74 @@
 }
 .settings input {
   margin: 0;
-  accent-color: #7fe0ff;
+  cursor: pointer;
+}
+.settings input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  background: none;
+}
+.settings input[type='range']::-webkit-slider-runnable-track {
+  height: 1px;
+  background: rgba(150, 215, 255, 0.3);
+}
+.settings input[type='range']::-moz-range-track {
+  height: 1px;
+  background: rgba(150, 215, 255, 0.3);
+}
+.settings input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 3px;
+  height: 16px;
+  margin-top: -7.5px;
+  border: none;
+  border-radius: 1px;
+  background: var(--warm);
+  box-shadow: 0 0 8px rgba(255, 180, 94, 0.45);
+}
+.settings input[type='range']::-moz-range-thumb {
+  width: 3px;
+  height: 16px;
+  border: none;
+  border-radius: 1px;
+  background: var(--warm);
+  box-shadow: 0 0 8px rgba(255, 180, 94, 0.45);
 }
 .settings input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
   justify-self: start;
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border: 1px solid rgba(150, 215, 255, 0.3);
+  border-radius: 3px;
+  transition: border-color 0.18s, background 0.18s;
+}
+.settings input[type='checkbox']::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 1px;
+  background: rgba(207, 233, 255, 0.45);
+  transition: transform 0.18s, background 0.18s;
+}
+.settings input[type='checkbox']:checked {
+  border-color: var(--warm);
+  background: rgba(255, 180, 94, 0.14);
+}
+.settings input[type='checkbox']:checked::after {
+  transform: translateX(14px);
+  background: var(--warm);
 }
 .settings output {
-  font-size: 14px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
   color: var(--ui-dim);
   text-align: right;
 }
@@ -306,13 +425,13 @@
   align-items: center;
   gap: 4px;
   padding: 14px 20px 0;
-  border-bottom: 1px solid var(--ui-line);
+  border-bottom: 1px solid rgba(150, 215, 255, 0.18);
 }
 .tab {
   font-family: inherit;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--ui-dim);
   background: none;
@@ -322,9 +441,6 @@
   cursor: pointer;
   transition: color 0.15s;
 }
-.tab:hover {
-  color: var(--ui);
-}
 .tab.on {
   color: var(--ui);
   border-bottom-color: var(--warm);
@@ -333,8 +449,8 @@
   margin-left: auto;
   display: flex;
   gap: 18px;
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 .inv-status .data {
   color: #9fe8ff;
@@ -346,14 +462,11 @@
   margin-left: 18px;
   padding: 4px 0;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--ui-dim);
   background: none;
   border: none;
   cursor: pointer;
-}
-.inv-close:hover {
-  color: var(--ui);
 }
 .inv-body {
   flex: 1;
@@ -365,8 +478,8 @@
     padding: 10px 10px 0;
   }
   .tab {
-    font-size: 14px;
-    letter-spacing: 0.08em;
+    font-size: 12.5px;
+    letter-spacing: 0.1em;
     padding: 8px 8px;
   }
   .inv-body {
@@ -383,6 +496,7 @@
   padding: 10px 12px 10px 44px;
   background: rgba(20, 30, 45, 0.5);
   border-left: 3px solid var(--c);
+  border-radius: 0 3px 3px 0;
 }
 .res.empty {
   opacity: 0.45;
@@ -398,15 +512,16 @@
   box-shadow: 0 0 10px var(--c);
 }
 .res-name {
-  font-weight: 600;
-  font-size: 16px;
+  font-weight: 500;
+  font-size: 15px;
 }
 .res-count {
   position: absolute;
   right: 12px;
   top: 9px;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
 }
 .res-count span {
   font-size: 12px;
@@ -416,7 +531,7 @@
   background: var(--c);
 }
 .res-desc {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--ui-dim);
   margin-top: 5px;
   line-height: 1.3;
@@ -430,20 +545,21 @@
   padding: 14px 16px;
   background: rgba(20, 30, 45, 0.5);
   border: 1px solid rgba(150, 215, 255, 0.15);
+  border-radius: 3px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 .card-title {
-  font-size: 19px;
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 500;
 }
 .card-desc {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ui-dim);
 }
 .card-note {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--warm);
 }
 .card .btn {
@@ -456,7 +572,9 @@
   gap: 6px;
 }
 .cost {
-  font-size: 13px;
+  font-size: 12px;
+  border-radius: 2px;
+  font-variant-numeric: tabular-nums;
   padding: 2px 8px;
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -489,10 +607,11 @@
   align-items: center;
   padding: 10px 14px;
   background: rgba(20, 30, 45, 0.5);
+  border-radius: 3px;
 }
 .upg-name {
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 500;
 }
 .pips {
   display: flex;
@@ -508,7 +627,8 @@
   background: var(--warm);
 }
 .upg-next b {
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: 600;
 }
 /* stack name, next level and button once the middle column gets squeezed */
 @media (max-width: 720px) {
@@ -527,8 +647,9 @@
 }
 .journal h4 {
   margin: 0 0 8px;
-  font-size: 13px;
-  letter-spacing: 0.2em;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--warm);
 }
@@ -545,15 +666,18 @@
   padding: 8px 4px;
   border: 1px solid rgba(150, 215, 255, 0.14);
   background: rgba(150, 215, 255, 0.04);
+  border-radius: 3px;
 }
 .j-stat b {
   color: var(--ui);
   font-size: 22px;
-  font-weight: 700;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
   line-height: 1.1;
 }
 .j-stat span {
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 500;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--ui-dim);
@@ -577,7 +701,7 @@
   flex-direction: column;
 }
 .j-world-text span {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--ui-dim);
 }
 .j-chips {
@@ -588,11 +712,11 @@
 }
 .j-chips i {
   font-style: normal;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 10.5px;
+  font-weight: 500;
   letter-spacing: 0.06em;
   padding: 1px 7px;
-  border-radius: 20px;
+  border-radius: 2px;
   border: 1px solid rgba(150, 215, 255, 0.25);
   color: var(--ui-dim);
 }
@@ -610,23 +734,24 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 .j-row span {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--ui-dim);
 }
 .j-empty {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ui-dim);
 }
 .j-lore {
   margin-bottom: 14px;
-  font-size: 14px;
+  font-size: 13.5px;
   line-height: 1.45;
 }
 .j-lore p {
   margin: 3px 0;
 }
 .j-lore-title {
-  font-weight: 700;
+  font-weight: 500;
+  font-size: 15px;
   color: #e6d4ff;
 }
 
@@ -636,23 +761,23 @@
   text-align: left;
 }
 .dlg-title {
-  font-size: 24px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 500;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: #e6d4ff;
   margin-bottom: 10px;
 }
 .dlg-body {
-  font-size: 17px;
-  line-height: 1.55;
+  font-size: 15px;
+  line-height: 1.65;
 }
 .dlg-body i {
   color: #fff3d6;
 }
 .dlg-reward {
   margin: 12px 0 14px;
-  font-size: 15px;
+  font-size: 14px;
   color: var(--good);
 }
 
@@ -670,8 +795,8 @@
   position: absolute;
   left: 28px;
   top: 22px;
-  font-size: 26px;
-  font-weight: 600;
+  font-size: 24px;
+  font-weight: 500;
   letter-spacing: 0.3em;
   text-transform: uppercase;
 }
@@ -679,7 +804,7 @@
   position: absolute;
   left: 28px;
   bottom: 24px;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ui-dim);
   line-height: 1.8;
 }
@@ -714,9 +839,6 @@
   cursor: pointer;
   pointer-events: auto;
 }
-.gmap-close:hover {
-  color: var(--ui);
-}
 .gmap-close:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 2px;
@@ -731,7 +853,8 @@
   overflow-y: auto;
   padding: 16px 18px;
   background: rgba(8, 15, 26, 0.82);
-  border: 1px solid var(--ui-line);
+  border: 1px solid rgba(150, 215, 255, 0.22);
+  border-radius: 3px;
   pointer-events: auto;
   display: flex;
   flex-direction: column;
@@ -765,19 +888,21 @@
   }
 }
 .gi-here {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--ui-dim);
   padding-bottom: 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 .gi-name {
   font-size: 24px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--c);
   text-shadow: 0 0 12px var(--c);
 }
 .gi-goal {
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 2px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: #e6d4ff;
@@ -787,14 +912,14 @@
   text-shadow: none;
 }
 .gi-row {
-  font-size: 15px;
+  font-size: 13.5px;
 }
 .gi-why {
-  font-size: 14px;
+  font-size: 13px;
   color: #ffb1a6;
 }
 .gi-route {
-  font-size: 15px;
+  font-size: 13.5px;
   color: #ffd28a;
   margin-top: 4px;
 }
@@ -802,21 +927,21 @@
   color: #ffe6b8;
 }
 .gi-hint {
-  font-size: 15px;
+  font-size: 13.5px;
   color: var(--ui-dim);
 }
 .gi-core {
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 14px;
+  font-size: 13px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   color: #ffe9b0;
 }
 .gi-cells {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--warm);
   margin-top: 4px;
 }
@@ -828,11 +953,12 @@
   left: 0;
   top: 0;
   padding: 5px 10px 6px;
-  font-size: 13px;
+  font-size: 12.5px;
   letter-spacing: 0.04em;
   color: var(--ui-dim);
   background: rgba(8, 15, 26, 0.82);
   border: 1px solid var(--ui-line);
+  border-radius: 3px;
   white-space: nowrap;
   display: none;
 }
@@ -841,8 +967,8 @@
 }
 .gmap-hover b {
   display: block;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 500;
   color: var(--c);
 }
 
@@ -862,13 +988,14 @@
   text-align: center;
 }
 .death-title {
-  font-size: 40px;
+  font-size: 36px;
+  font-weight: 500;
   letter-spacing: 0.3em;
   text-transform: uppercase;
   color: var(--danger);
 }
 .death-text {
-  font-size: 17px;
+  font-size: 15px;
   color: var(--ui);
 }
 

@@ -2,7 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit lets the game draw under notches (the HUD keeps to the safe
+         area), and no zoom stops iOS zooming in when the seed box gets focus -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>Starsong | Procedural Space Exploration Game in the Browser</title>
     <meta name="description" content="A free space exploration game for the browser. Land on procedural planets, fly between them without loading screens and warp across 24,000 star systems." />
     <link rel="canonical" href="https://spacegame.jarvisar.com/" />
@@ -42,7 +44,8 @@
       }
     </script>
 
-    <link rel="preload" href="/node_modules/@fontsource/rajdhani/files/rajdhani-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/src/ui/fonts/jost.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/src/ui/fonts/inter.woff2" as="font" type="font/woff2" crossorigin />
     <script>
       document.documentElement.classList.add('js');
       // a script that fails to load would leave the loading screen up for good
@@ -55,12 +58,12 @@
     <!-- Inline so the loading screen is styled from the first paint. The dev
          server only adds the rest of the CSS once the scripts have loaded. -->
     <style>
-      /* same file as the Rajdhani 400 in style.css, under its own name so it can block instead of swapping */
+      /* same file as Jost in style.css, under its own name so it can block instead of swapping */
       @font-face {
-        font-family: 'Rajdhani Boot';
-        font-weight: 400;
+        font-family: 'Jost Boot';
+        font-weight: 100 900;
         font-display: block;
-        src: url('@fontsource/rajdhani/files/rajdhani-latin-400-normal.woff2') format('woff2');
+        src: url('./src/ui/fonts/jost.woff2') format('woff2');
       }
       html,
       body {
@@ -69,7 +72,7 @@
         overflow: hidden;
         background: #000;
         color: #cfe9ff;
-        font-family: 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+        font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
       }
 
       /* Matches the title screen (.title-inner and .title-name in menus.css)
@@ -84,7 +87,7 @@
         justify-content: center;
         padding: 8vh 16px;
         background: #000;
-        font-family: 'Rajdhani Boot', 'Rajdhani', 'Segoe UI', system-ui, sans-serif;
+        font-family: 'Jost Boot', 'Jost', 'Segoe UI', system-ui, sans-serif;
         user-select: none;
         -webkit-user-select: none;
         transition: opacity 0.9s, visibility 0s 0.9s;
@@ -113,7 +116,7 @@
       }
       .boot-bar {
         width: 220px;
-        height: 2px;
+        height: 1px;
         margin: 20px auto 0;
         background: rgba(150, 215, 255, 0.14);
         overflow: hidden;
@@ -130,8 +133,9 @@
       .boot-label {
         margin-top: 14px;
         min-height: 16px;
-        font-size: 13px;
-        letter-spacing: 0.24em;
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0.2em;
         text-transform: uppercase;
         color: rgba(207, 233, 255, 0.5);
       }
@@ -215,6 +219,7 @@
         display: none;
       }
       #about h1 {
+        font-family: 'Jost Boot', 'Jost', 'Segoe UI', system-ui, sans-serif;
         font-size: clamp(40px, 7vw, 88px);
         font-weight: 300;
         letter-spacing: 0.42em;
@@ -258,7 +263,7 @@
     <main id="about">
       <h1>Starsong</h1>
       <p>A free space exploration game for the browser. Land on procedural planets, fly between them without loading screens and follow a signal across a galaxy of 24,000 star systems toward its core.</p>
-      <p>Needs a desktop browser with WebGL2 and a mouse and keyboard.</p>
+      <p>Needs a browser with WebGL2. Plays with a mouse and keyboard or with touch.</p>
       <noscript><p>JavaScript is turned off, so the game can't start.</p></noscript>
       <p id="load-failed" class="about-error" hidden>The game didn't finish loading. Check your connection and reload the page.</p>
     </main>

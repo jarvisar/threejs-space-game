@@ -26,6 +26,7 @@ Visit [spacegame.jarvisar.com](https://spacegame.jarvisar.com) to play the lates
 - All music and sound effects are synthesized in the browser with WebAudio. The music changes with the planet you're on.
 - Progress saves to localStorage automatically.
 - Can be installed as an app from Chrome or Edge. After the first load it also works offline.
+- Plays on phones and tablets with on-screen controls. See [Phones & Tablets](#phones--tablets).
 
 ## How to Play
 
@@ -57,6 +58,19 @@ Anywhere:
 - `Tab` opens cargo, crafting, upgrades and the journal. `J` goes straight to the journal.
 - `G` opens the galaxy map. Drag to rotate and scroll to zoom. Hover a star to see its name and distance, and click it to plot a jump. If it's out of range the map plots a route and the warp button takes you to the next stop. Press `C` to center on your star and `T` to find the signal.
 - `P` toggles photo mode, which hides the HUD and freezes the world. Fly the camera with `WASD`, `R`/`F` to go up and down, `Q`/`E` to roll and the wheel to change speed. Hold `Z`/`X` to move the time of day, `1`/`2` to zoom, `B` for focus blur, `V` to cycle filters and `H` to hide the ship. `Enter` saves a PNG.
+
+### Phones & Tablets
+
+The game switches to on-screen controls as soon as you touch the screen, and back to mouse and keyboard when you use them. It goes fullscreen when you start a game, except on iPhone where that only works after adding it to the home screen.
+
+- The left side of the screen is a stick. On foot it moves you, and pushing it all the way sprints. In the ship it's throttle and roll.
+- Drag on the right side to look around. In the ship the drag steers instead, and the further your finger is from where it landed the faster you turn.
+- Hold `Mine` or `Analyze` and drag the same finger to aim while you use them.
+- Buttons like `Land`, `Board ship` and `Orbit` show up above the others when you can use them.
+- Pinch to move the ship camera in or out, zoom in photo mode, or zoom the galaxy map.
+- The top right buttons open the galaxy map, inventory, photo mode and the pause menu. Tapping outside a menu closes it.
+
+Phones and tablets start on the Low graphics preset with adaptive resolution on, which lowers the render scale by itself while the frame rate is low. Both can be changed in the pause menu.
 
 ## Orbits
 
@@ -128,11 +142,12 @@ For debugging, `?prof=1` keeps the worst time per section of the frame in `windo
 ## Known Issues & Limitations
 
 - Needs WebGL2 with float render targets. It has only been tested in Chrome on Windows.
-- On an RTX 4080 Super a frame takes about 3 ms at 1080p. Integrated graphics will need the render scale lowered to 0.5 or 0.6.
+- On an RTX 4080 Super a frame takes about 3 ms at 1080p. Integrated graphics will need the Graphics setting on Low or Medium, or the render scale lowered to 0.5 or 0.6.
 - Planets spin but don't orbit their star. Keeping them in place made landing and walking a lot simpler.
 - Auroras sit in a band around each pole, so on most worlds you need to be at a fairly high latitude to see them from the ground. From orbit they show up as a ring on the night side.
 - Terrain is a height field, so there are no caves or overhangs.
-- Only mouse and keyboard are supported. There is no touch or gamepad input.
+- There is no gamepad support.
+- The touch controls have only been tested with Chrome's phone emulation, not on real phones yet. I don't have frame rate numbers for any mobile GPU, so the Low preset is a guess at what an average phone can handle.
 - Mined plants and rocks are remembered, but only the most recent 5000.
 - There is one save slot. Starting a new game replaces it, and the title screen asks first.
 - The save is stored per browser. Clearing site data deletes it.
@@ -151,6 +166,6 @@ For debugging, `?prof=1` keeps the worst time per section of the frame in `windo
 ## Credits
 
 - [Three.js](https://threejs.org)
-- Rajdhani font by Indian Type Foundry, via Fontsource (SIL Open Font License)
+- [Inter](https://github.com/rsms/inter) and [Jost](https://github.com/indestructible-type/Jost) fonts (SIL Open Font License), in `src/ui/fonts`
 - 3D simplex noise based on the public domain implementation by Stefan Gustavson and the GLSL version by Ashima Arts (MIT)
 - [N8AO](https://github.com/N8python/n8ao) by N8python (CC0), copied into `src/render/n8ao` with changes for the logarithmic depth buffer

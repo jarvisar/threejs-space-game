@@ -1,6 +1,7 @@
 import { STAR_CLASSES } from '../gen/galaxy.js';
 import { stats, level, UPGRADES, RECIPES } from './upgrades.js';
 import { Planet } from '../world/planet.js';
+import { device } from '../core/device.js';
 
 // Objective chain. Stages move forward on events from the game, and
 // objective() describes what the HUD should show for the current stage.
@@ -38,18 +39,19 @@ export class Story {
       const have = Math.min(need, inv[res] || 0);
       return `<span class="${have >= need ? 'done' : ''}">${have}/${need}</span>`;
     };
+    const t = device.touch;
     switch (this.s.stage) {
       case 'repair':
         if (inv.ferrite >= REPAIR.ferrite && inv.carbon >= REPAIR.carbon)
-          return { title: 'Repair Your Ship', text: 'Return to your ship and press <b>E</b> to repair the launch thrusters.' };
+          return { title: 'Repair Your Ship', text: t ? 'Return to your ship and tap <b>Repair and board ship</b>.' : 'Return to your ship and press <b>E</b> to repair the launch thrusters.' };
         return {
           title: 'Repair Your Ship',
-          text: `Your launch thrusters are damaged. Hold <b>Left Mouse</b> to mine.<br>Ferrite from rocks ${k('ferrite', REPAIR.ferrite)}<br>Carbon from plants ${k('carbon', REPAIR.carbon)}`,
+          text: `Your launch thrusters are damaged. Hold <b>${t ? 'Mine' : 'Left Mouse'}</b> to mine.<br>Ferrite from rocks ${k('ferrite', REPAIR.ferrite)}<br>Carbon from plants ${k('carbon', REPAIR.carbon)}`,
         };
       case 'launch':
-        return { title: 'Take Off', text: 'Board your ship, press <b>W</b> to take off, then climb out of the atmosphere.' };
+        return { title: 'Take Off', text: `Board your ship, ${t ? 'tap <b>Take off</b>' : 'press <b>W</b> to take off'}, then climb out of the atmosphere.` };
       case 'explore':
-        return { title: 'Land on Another Planet', text: 'Press <b>Space</b> away from planets to use the pulse drive. Fly to another planet and land on it.' };
+        return { title: 'Land on Another Planet', text: `${t ? 'Tap <b>Pulse</b>' : 'Press <b>Space</b>'} away from planets to use the pulse drive. Fly to another planet and land on it.` };
       case 'fuel': {
         const cells = st.warpCells;
         return {

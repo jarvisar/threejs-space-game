@@ -298,9 +298,15 @@ export function createTerrainMaterial(def, planetUniforms) {
         float layer = floor(band);
         float tone = fract(layer * 0.618 + uSeed);
         vec3 rock = mix(uColCliff, uColHigh, 0.2 + 0.55 * tone * uStrataK);
-        // pale seams between some of the layers
-        float seam = smoothstep(0.8, 0.86, fract(band)) * step(0.5, fract(layer * 0.37)) * uStrataK * fine;
+        // Filter the fine seams before they become thinner than a pixel.
+        float bw = max(fwidth(band), 0.002);
+        float strataFine = (1.0 - smoothstep(0.08, 0.45, bw)) * uStrataK * fine;
+        float seam = smoothstep(0.8 - bw, 0.86 + bw, fract(band)) * step(0.5, fract(layer * 0.37)) * strataFine;
         rock = mix(rock, mix(uColSand, uColPeak, 0.35), seam * 0.3);
+        float bedding = abs(fract(band + 0.12) - 0.5);
+        float recess = 1.0 - smoothstep(0.012 + bw, 0.065 + bw, bedding);
+        float ledge = smoothstep(0.065 + bw, 0.12 + bw, bedding) * (1.0 - smoothstep(0.12 + bw, 0.2 + bw, bedding));
+        rock *= 1.0 + (ledge * 0.07 - recess * 0.16) * strataFine;
         c = mix(c, rock, cliff);
 
         float lat = abs(up.y);

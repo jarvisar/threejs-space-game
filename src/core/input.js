@@ -1,5 +1,8 @@
+import { device } from './device.js';
+
 // Keyboard/mouse state with per-frame edge detection. Everything reads keys by
-// KeyboardEvent.code so layouts like AZERTY still map by position.
+// KeyboardEvent.code so layouts like AZERTY still map by position. The touch
+// controls (ui/touch.js) feed the same sets, plus analog values for the stick.
 
 export class Input {
   constructor(canvas) {
@@ -7,6 +10,8 @@ export class Input {
     this.down = new Set();
     this.pressed = new Set();
     this.mouseDown = new Set();
+    // 0..1 per key code, from the touch stick
+    this.analog = new Map();
     this.dx = 0;
     this.dy = 0;
     this.wheel = 0;
@@ -56,6 +61,7 @@ export class Input {
   }
 
   lock() {
+    if (device.touch) return;
     if (!this.locked && this.canvas.requestPointerLock) {
       const p = this.canvas.requestPointerLock();
       if (p && p.catch) p.catch(() => {});
@@ -67,7 +73,12 @@ export class Input {
   }
 
   key(code) {
-    return this.enabled && this.down.has(code);
+    return this.enabled && this.raw(code);
+  }
+
+  // ignores `enabled`, photo mode reads keys while the game is paused
+  raw(code) {
+    return this.down.has(code) || (this.analog.get(code) || 0) > 0.3;
   }
 
   hit(code) {
@@ -79,7 +90,9 @@ export class Input {
   }
 
   axis(neg, pos) {
-    return (this.key(pos) ? 1 : 0) - (this.key(neg) ? 1 : 0);
+    if (!this.enabled) return 0;
+    const v = (code) => (this.down.has(code) ? 1 : this.analog.get(code) || 0);
+    return v(pos) - v(neg);
   }
 
   look() {

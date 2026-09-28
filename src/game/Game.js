@@ -22,11 +22,14 @@ import { planRoute } from '../gen/route.js';
 import { faunaSpecies } from '../world/fauna.js';
 import { planetSpecies } from '../gen/flora.js';
 import { Input } from '../core/input.js';
+import { device, onDeviceChange, toggleFullscreen } from '../core/device.js';
+import { PRESETS, detail } from '../render/quality.js';
+import { TouchControls } from '../ui/touch.js';
 import { Ship } from '../player/ship.js';
 import { OrbitLine, orbitFloor, timeToRadius } from '../player/orbit.js';
 import { EntryFx } from '../render/entryFx.js';
 import { Walker } from '../player/walker.js';
-import { CameraRig } from '../player/cameraRig.js';
+import { CameraRig, portraitFov } from '../player/cameraRig.js';
 import { Multitool } from '../player/multitool.js';
 import { HUD, fmtDist } from '../ui/hud.js';
 import { Menus } from '../ui/menus.js';
@@ -121,13 +124,17 @@ export class Game {
     this.lampK = 0;
 
     this.pipeline = new Pipeline(this.renderer, this.scene, this.camera);
-    if (this.params.has('msaa')) this.pipeline.samples = parseInt(this.params.get('msaa'), 10);
-    this.pool = new WorkerPool(Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 2)));
+    // phones report 8 cores but most are small ones, and every worker holds its own terrain generator
+    this.pool = new WorkerPool(Math.max(2, Math.min(device.mobile ? 3 : 6, (navigator.hardwareConcurrency || 4) - 2)));
+    // adaptive resolution on top of the render scale setting, see updateAutoScale()
+    this.autoScale = 1;
+    this.perf = { t: 0, n: 0, good: 0 };
 
     this.input = new Input(this.renderer.domElement);
     this.hud = new HUD(uiRoot);
     this.menus = new Menus(uiRoot, this);
     this.map = new GalaxyMap(this, uiRoot);
+    this.touch = new TouchControls(this, uiRoot, this.menus.root);
     this.rig = new CameraRig();
     this.debugCam = new DebugCam();
     this.audio = new AudioEngine();
@@ -150,7 +157,25 @@ export class Game {
 
     this.applySettings();
     this.onResize();
-    window.addEventListener('resize', () => this.onResize());
+    window.addEventListener('resize', () => {
+      this.onResize();
+      // phones can report the old size on the resize after a rotation
+      clearTimeout(this.resizeT);
+      this.resizeT = setTimeout(() => this.onResize(), 300);
+    });
+    // after the page was in the background, the next touch brings the sound back
+    window.addEventListener('pointerdown', () => this.audio.ctx && this.audio.init(), true);
+    document.addEventListener('visibilitychange', () => this.onVisibility());
+    // a tap while "Click to resume" is up would never get the pointer lock it waits for
+    onDeviceChange(() => {
+      if (!device.touch || !this.awaitLock) return;
+      this.hud.clearMessage();
+      this.resume();
+    });
+    // mobile browsers can drop a backgrounded page without a beforeunload
+    window.addEventListener('pagehide', () => {
+      if (this.screen === 'play' && !this.warp) this.saveGame();
+    });
     this.renderer.domElement.addEventListener('click', () => {
       this.audio.init();
       if (this.screen === 'play' && !this.menuOpen) this.input.lock();
@@ -176,7 +201,10 @@ export class Game {
   // ---------------------------------------------------------------- settings
 
   loadSettings() {
-    const d = { sensitivity: 1, invertY: false, renderScale: 1, shadows: true, ao: true, dof: true, volume: 0.8, music: 0.55 };
+    const d = { sensitivity: 1, invertY: false, renderScale: 1, shadows: true, ao: true, dof: true, volume: 0.8, music: 0.55, quality: 2, autoScale: false };
+    // Phones and tablets start on the low preset with adaptive resolution. AO
+    // is the most expensive pass after the atmosphere, so it starts off there.
+    if (device.mobile) Object.assign(d, { quality: 0, autoScale: true, ao: false });
     try {
       return Object.assign(d, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'));
     } catch {
@@ -191,8 +219,9 @@ export class Game {
     } catch {
       // storage blocked, settings just won't persist
     }
+    if (k === 'autoScale') this.autoScale = 1;
     this.applySettings();
-    if (k === 'renderScale') this.onResize();
+    if (k === 'renderScale' || k === 'quality' || k === 'autoScale') this.onResize();
   }
 
   applySettings() {
@@ -202,13 +231,39 @@ export class Game {
     this.audio.volume = s.volume;
     this.audio.musicVolume = s.music;
     this.sunLight.castShadow = s.shadows;
+    this.applyQuality();
+  }
+
+  applyQuality() {
+    const q = PRESETS[this.settings.quality] || PRESETS[2];
+    this.quality = q;
+    this.pipeline.samples = this.params.has('msaa') ? parseInt(this.params.get('msaa'), 10) : q.samples;
+    const sh = this.sunLight.shadow;
+    if (sh.mapSize.x !== q.shadowMap) {
+      sh.mapSize.set(q.shadowMap, q.shadowMap);
+      // three only sizes the map when it creates it
+      if (sh.map) {
+        sh.map.dispose();
+        sh.map = null;
+        this.pipeline.shadowInit = false;
+      }
+    }
+    const a = this.pipeline.atmoUniforms;
+    [a.uViewSteps.value, a.uLightSteps.value, a.uAuroraSteps.value] = q.atmo;
+    detail.lod = q.lod;
+    detail.scatter = q.scatter;
   }
 
   onResize() {
-    const scale = parseFloat(this.params.get('scale') || '1') * (this.settings.renderScale || 1);
-    const pr = Math.min(window.devicePixelRatio || 1, 2) * scale;
+    const scale = parseFloat(this.params.get('scale') || '1') * (this.settings.renderScale || 1) * this.autoScale;
+    const pr = Math.min(window.devicePixelRatio || 1, this.quality.pixelRatio) * scale;
     const w = window.innerWidth;
     const h = window.innerHeight;
+    // every size change reallocates all the render targets, and phones fire
+    // resize a lot (rotation, browser bars)
+    const key = `${w}x${h}@${pr}/${this.pipeline.samples}`;
+    if (key === this.sizeKey) return;
+    this.sizeKey = key;
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
@@ -245,6 +300,8 @@ export class Game {
     if (this.loadingGame) return this.loadingGame;
     this.audio.init();
     this.audio.click();
+    // browser bars take a lot of a phone screen. Has to happen inside the tap.
+    if (device.touch) toggleFullscreen(true);
     this.menus.setFade(1);
     this.loadingGame = new Promise((resolve) => setTimeout(() => {
       if (kind === 'continue') {
@@ -584,7 +641,8 @@ export class Game {
   // after a keyboard-only close (Esc), so the game waits for a click instead
   // of running with a dead mouse.
   resume() {
-    if (document.pointerLockElement || this.params.has('capture')) {
+    // touch has no pointer lock to wait for
+    if (document.pointerLockElement || this.params.has('capture') || device.touch) {
       this.paused = false;
       this.awaitLock = false;
       return;
@@ -595,6 +653,49 @@ export class Game {
     setTimeout(() => {
       if (this.awaitLock && !this.menuOpen && this.screen === 'play') this.hud.message('Click to resume', 600000);
     }, 250);
+  }
+
+  // Phones background the page without a pointer lock to lose, so this is
+  // what pauses the game there. The music would keep playing otherwise.
+  onVisibility() {
+    const ctx = this.audio.ctx;
+    if (!document.hidden) {
+      if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+      return;
+    }
+    if (ctx) ctx.suspend().catch(() => {});
+    if (this.screen !== 'play' || this.warp) return;
+    this.saveGame();
+    if (this.menuOpen) return;
+    if (this.photo) this.exitPhoto();
+    this.openMenu('pause');
+  }
+
+  // Adaptive resolution. Drops the render scale when frames run slow for a
+  // couple of seconds and only creeps back up after a longer stretch of
+  // headroom, so it doesn't bounce. Each change reallocates the render
+  // targets, which is why it only looks every 2.5 s.
+  updateAutoScale(dt) {
+    const p = this.perf;
+    if (!this.settings.autoScale || this.screen !== 'play' || this.paused || this.holdRender || this.warp) {
+      p.t = p.n = 0;
+      return;
+    }
+    p.t += dt;
+    p.n++;
+    if (p.t < 2.5) return;
+    const avg = p.t / p.n;
+    p.t = p.n = 0;
+    if (avg > 1 / 40 && this.autoScale > 0.5) {
+      this.autoScale = Math.max(0.5, this.autoScale - 0.1);
+      p.good = 0;
+      this.onResize();
+    } else if (avg < 1 / 54 && this.autoScale < 1) {
+      if (++p.good < 3) return;
+      this.autoScale = Math.min(1, this.autoScale + 0.1);
+      p.good = 0;
+      this.onResize();
+    } else p.good = 0;
   }
 
   // ---------------------------------------------------------------- inventory ops
@@ -793,7 +894,9 @@ export class Game {
     env.uTime.value = this.time;
     const input = this.input;
     input.enabled = !this.paused;
+    this.touch.update(dt);
     this.handleGlobalKeys();
+    this.updateAutoScale(dt);
 
     if (this.screen === 'play' && !this.paused) {
       this.state.worldTime += dt;
@@ -855,7 +958,7 @@ export class Game {
 
     this.camera.position.set(0, 0, 0);
     this.camera.quaternion.copy(this.rig.worldQuat);
-    const fov = this.rig.fov * (this.visor ? 0.62 : 1);
+    const fov = portraitFov(this.rig.fov * (this.visor ? 0.62 : 1), this.camera.aspect);
     if (Math.abs(this.camera.fov - fov) > 0.01) {
       this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 7);
       this.camera.updateProjectionMatrix();
@@ -871,8 +974,12 @@ export class Game {
     this.updateAO(dt);
     this.profMark('hud');
     this.pipeline.setAtmospheres(this.system.atmosphereList());
+    // Behind a menu the world is paused, so on the low preset a few frames a
+    // second is plenty and saves a phone's battery. Frames that aren't drawn
+    // just leave the last one on screen.
+    const idle = this.quality === PRESETS[0] && this.screen === 'play' && this.paused && this.menuOpen && !this.photo;
     // held while prepareView() compiles shaders and waits for terrain
-    if (!this.holdRender) this.pipeline.render(this.time, this.shadowsActive, dt);
+    if (!this.holdRender && !(idle && this.frame % 6)) this.pipeline.render(this.time, this.shadowsActive, dt);
     if (this.snapNext) {
       this.snapNext = false;
       this.savePhoto();
@@ -968,9 +1075,8 @@ export class Game {
   // the free camera does.
   updatePhoto(dt) {
     const k = this.input.pressed;
-    const down = this.input.down;
     const hud = this.hud;
-    const t = (down.has('KeyX') ? 1 : 0) - (down.has('KeyZ') ? 1 : 0);
+    const t = (this.input.raw('KeyX') ? 1 : 0) - (this.input.raw('KeyZ') ? 1 : 0);
     if (t) {
       this.shiftTimeOfDay(t * dt);
       const f = this.system.focus;
@@ -1018,11 +1124,18 @@ export class Game {
     const name = `starsong-${this.systemDef.name}${body ? '-' + body.def.name : ''}`.replace(/[^\w-]+/g, '-').toLowerCase();
     this.renderer.domElement.toBlob((blob) => {
       if (!blob) return;
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `${name}.png`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      const download = () => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${name}.png`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      };
+      // on phones the share sheet is how a picture ends up in the photo library
+      const file = new File([blob], `${name}.png`, { type: 'image/png' });
+      if (device.touch && navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file] }).catch((err) => err.name !== 'AbortError' && download());
+      } else download();
     }, 'image/png');
     this.audio.click();
     this.hud.photoStatus('Saved');
@@ -1790,7 +1903,8 @@ export class Game {
     if (suit.shield < 0.25 && drain > 0 && !this.shieldWarned) {
       this.shieldWarned = true;
       this.audio.alert();
-      this.hud.message(this.state.count('lumen') >= 10 ? 'Hazard shield low, press R to recharge' : 'Hazard shield low, find Lumen or return to your ship', 3500);
+      const how = device.touch ? 'tap Recharge shield' : 'press R to recharge';
+      this.hud.message(this.state.count('lumen') >= 10 ? `Hazard shield low, ${how}` : 'Hazard shield low, find Lumen or return to your ship', 3500);
     } else if (suit.shield > 0.4) this.shieldWarned = false;
     if (suit.health <= 0) this.die();
   }
@@ -1933,7 +2047,7 @@ export class Game {
       this.saveSoon = true;
       if (w.core) this.reachCore();
       // Esc during the jump let go of the mouse without pausing
-      if (!document.pointerLockElement && !this.params.has('capture')) this.openMenu('pause');
+      if (!document.pointerLockElement && !this.params.has('capture') && !device.touch) this.openMenu('pause');
     }
   }
 
@@ -2032,13 +2146,16 @@ export class Game {
       else if (s.boost > 0.2) mode = 'Boost';
       hud.updateFlight({ mode, sub, speed: o ? o.v.length() : s.speed, alt: s.frame ? s.altitude : Infinity, throttle: s.throttle, energy: s.energy, pulse: s.pulse, orbit: !!o });
       hud.setHeat(s.heat);
-      let prompt = null;
+      let actions = [];
       const flying = s.state === 'flying';
+      const exit = { code: 'KeyE', key: 'E', label: 'Exit ship' };
       // no take off prompt while the thrusters are still broken
-      if (s.state === 'landed') prompt = this.state.story.stage === 'repair' ? '<kbd>E</kbd>Exit ship' : '<kbd>E</kbd>Exit ship &nbsp; <kbd>W</kbd>Take off';
-      else if (flying && s.canLand() === null) prompt = this.landSite === false ? '<span class="dim">No flat ground here</span>' : '<kbd>E</kbd>Land';
-      else if (flying && !s.pulse && s.canOrbit() === null) prompt = '<kbd>C</kbd>Orbit';
-      hud.prompt(prompt);
+      if (s.state === 'landed') actions = this.state.story.stage === 'repair' ? [exit] : [exit, { code: 'KeyW', key: 'W', label: 'Take off' }];
+      else if (flying && s.canLand() === null) actions = [this.landSite === false ? { label: 'No flat ground here' } : { code: 'KeyE', key: 'E', label: 'Land' }];
+      else if (flying && !s.pulse && s.canOrbit() === null) actions = [{ code: 'KeyC', key: 'C', label: 'Orbit' }];
+      hud.prompt(promptHtml(actions));
+      // the keyboard hint lists C for leaving orbit, touch needs a button
+      this.touch.setActions(o ? [{ code: 'KeyC', label: 'Leave orbit' }] : actions);
       if (flying) {
         const wp = s.worldPos(new THREE.Vector3());
         const wq = s.worldQuat(new THREE.Quaternion());
@@ -2056,12 +2173,15 @@ export class Game {
       }
       hud.setTarget(this.shipTarget);
     } else {
-      let prompt = null;
-      if (this.nearPoi) prompt = `<kbd>E</kbd>${POI_INFO[this.nearPoi.type].verb || 'Interact'}`;
-      else if (this.nearShip) prompt = `<kbd>E</kbd>${this.state.story.stage === 'repair' ? 'Repair and board ship' : 'Board ship'}`;
-      hud.prompt(prompt);
+      let actions = [];
+      if (this.nearPoi) actions = [{ code: 'KeyE', key: 'E', label: POI_INFO[this.nearPoi.type].verb || 'Interact' }];
+      else if (this.nearShip) actions = [{ code: 'KeyE', key: 'E', label: this.state.story.stage === 'repair' ? 'Repair and board ship' : 'Board ship' }];
+      hud.prompt(promptHtml(actions));
       const hz = this.walker.frame.def.hazard;
       const suit = this.state.suit;
+      // R has no prompt on desktop, the low shield warning names the key
+      const recharge = this.hazardActive && suit.shield < 0.5 && this.state.count('lumen') >= 10;
+      this.touch.setActions(recharge ? [...actions, { code: 'KeyR', label: 'Recharge shield' }] : actions);
       const danger = this.hazardActive ? Math.min(1, (1 - suit.shield) * 0.5 + (1 - suit.health) * 0.8) * Math.min(1, this.hazardK * 2) : 0;
       hud.updateSuit({
         hazardLabel: HAZARD_LABEL[hz.type] || 'Shield',
@@ -2148,9 +2268,17 @@ export class Game {
     hud.setMarkers(markers);
 
     let hint = null;
-    if (this.mode === 'ship' && this.ship.orbit) hint = '<kbd>W</kbd><kbd>S</kbd>Raise, lower orbit<br><kbd>A</kbd><kbd>D</kbd>Tilt orbit<br><kbd>Shift</kbd>Fast forward<br><kbd>Wheel</kbd>Zoom out<br><kbd>Space</kbd>Pulse where you look<br><kbd>C</kbd>Leave orbit';
-    else if (this.state.playTime < 90 && this.mode === 'foot') hint = '<kbd>LMB</kbd>Mine<br><kbd>RMB</kbd>Analyze<br><kbd>F</kbd>Scan<br><kbd>Tab</kbd>Inventory';
-    else if (this.state.playTime < 400 && this.mode === 'ship' && this.state.story.stage === 'explore' && !this.ship.orbit) hint = '<kbd>Space</kbd>Pulse drive<br><kbd>Shift</kbd>Boost<br><kbd>C</kbd>Orbit<br><kbd>RMB</kbd>Look around<br><kbd>F</kbd>Scan planet';
+    const orbiting = this.mode === 'ship' && this.ship.orbit;
+    const footIntro = this.state.playTime < 90 && this.mode === 'foot';
+    const shipIntro = this.state.playTime < 400 && this.mode === 'ship' && this.state.story.stage === 'explore' && !this.ship.orbit;
+    // the touch buttons are labeled, so these only cover what the screen doesn't show
+    if (device.touch) {
+      if (orbiting) hint = 'Left stick raises, lowers and tilts the orbit<br>Pulse heads where you look<br>Pinch to zoom out';
+      else if (footIntro) hint = 'Left side moves, right side looks<br>Push the stick all the way to sprint<br>Drag on Mine to aim while mining';
+      else if (shipIntro && this.ship.state === 'flying') hint = 'Drag on the right to steer<br>Left stick for throttle and roll<br>Pulse to travel between planets';
+    } else if (orbiting) hint = '<kbd>W</kbd><kbd>S</kbd>Raise, lower orbit<br><kbd>A</kbd><kbd>D</kbd>Tilt orbit<br><kbd>Shift</kbd>Fast forward<br><kbd>Wheel</kbd>Zoom out<br><kbd>Space</kbd>Pulse where you look<br><kbd>C</kbd>Leave orbit';
+    else if (footIntro) hint = '<kbd>LMB</kbd>Mine<br><kbd>RMB</kbd>Analyze<br><kbd>F</kbd>Scan<br><kbd>Tab</kbd>Inventory';
+    else if (shipIntro) hint = '<kbd>Space</kbd>Pulse drive<br><kbd>Shift</kbd>Boost<br><kbd>C</kbd>Orbit<br><kbd>RMB</kbd>Look around<br><kbd>F</kbd>Scan planet';
     hud.setHint(hint);
   }
 
@@ -2188,6 +2316,12 @@ export class Game {
     const mm = Math.floor((h - hh) * 60);
     return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
   }
+}
+
+// actions are { code, key, label }, one without a code is just a note
+function promptHtml(actions) {
+  if (!actions.length) return null;
+  return actions.map((a) => (a.code ? `<kbd>${a.key}</kbd>${a.label}` : `<span class="dim">${a.label}</span>`)).join(' &nbsp; ');
 }
 
 function fmtTime(t) {

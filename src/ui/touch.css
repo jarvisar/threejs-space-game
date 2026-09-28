@@ -1,0 +1,449 @@
+/* On-screen controls from ui/touch.js, plus the HUD and menu changes that go
+   with them. Everything is keyed off html.touch, which follows the input that
+   was used last (core/device.js). */
+
+:root {
+  --sl: env(safe-area-inset-left, 0px);
+  --sr: env(safe-area-inset-right, 0px);
+  --st: env(safe-area-inset-top, 0px);
+  --sb: env(safe-area-inset-bottom, 0px);
+}
+
+/* one set of text for each input, see Menus.controlsHtml() */
+.touch .no-touch,
+html:not(.touch) .only-touch {
+  display: none !important;
+}
+
+/* no text selection, callouts or tap flashes anywhere in the game UI. The
+   game view never scrolls or zooms, scrolling panels opt back in below. */
+#app,
+#ui {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.menus .screen,
+.panel,
+.inv-body,
+.gmap-info {
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+}
+
+.touch-ui {
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+}
+.touch .touch-ui:not([data-state='']) {
+  display: block;
+}
+.touch-zone {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+}
+
+.tbtn {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 0;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ui);
+  background: rgba(8, 16, 28, 0.38);
+  border: 1px solid rgba(150, 215, 255, 0.4);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  transition: background 0.12s, border-color 0.12s, opacity 0.2s, transform 0.12s;
+}
+.tbtn.on {
+  color: #fff;
+  background: rgba(60, 120, 160, 0.55);
+  border-color: var(--accent);
+  transform: scale(0.94);
+}
+.tbtn[hidden] {
+  display: none;
+}
+.tbtn.off {
+  opacity: 0;
+  pointer-events: none;
+}
+.tbtn.round {
+  width: var(--s);
+  height: var(--s);
+  border-radius: 50%;
+}
+.tbtn.pill {
+  position: static;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.tbtn.icon {
+  position: static;
+  width: 44px;
+  height: 44px;
+  border-radius: 3px;
+  display: grid;
+  place-items: center;
+}
+.tbtn.icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* map, inventory, photo, pause */
+.touch-top {
+  position: absolute;
+  top: calc(10px + var(--st));
+  right: calc(12px + var(--sr));
+  display: flex;
+  gap: 8px;
+}
+
+/* action cluster, bottom right under the thumb */
+.touch-actions {
+  position: absolute;
+  right: var(--sr);
+  bottom: var(--sb);
+  width: 190px;
+  height: 180px;
+}
+.slot1 {
+  --s: 76px;
+  right: 20px;
+  bottom: 22px;
+  font-size: 12px;
+}
+.slot2 {
+  --s: 62px;
+  right: 108px;
+  bottom: 16px;
+}
+.slot3 {
+  --s: 62px;
+  right: 30px;
+  bottom: 108px;
+}
+.slot4 {
+  --s: 50px;
+  right: 104px;
+  bottom: 92px;
+  font-size: 10px;
+}
+
+/* land, board, orbit and so on, above the cluster */
+.touch-context {
+  position: absolute;
+  right: calc(20px + var(--sr));
+  bottom: calc(196px + var(--sb));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.tbtn.ctx {
+  height: 44px;
+  font-size: 13px;
+  color: #ffe7c7;
+  background: rgba(80, 45, 10, 0.5);
+  border-color: var(--warm);
+  animation: ctx-in 0.2s ease-out;
+}
+.tbtn.ctx.on {
+  background: rgba(140, 80, 20, 0.65);
+}
+@keyframes ctx-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.ctx-note {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--ui-dim);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+/* Floating stick. Resting, it sits faintly in the corner so it's clear
+   where to put a thumb. Touched, it moves under the thumb (JS sets the
+   transform to the touch point). */
+.stick {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 116px;
+  height: 116px;
+  margin: -58px 0 0 -58px;
+  border-radius: 50%;
+  border: 1px solid rgba(150, 215, 255, 0.28);
+  background: radial-gradient(circle, rgba(8, 16, 28, 0.3), rgba(8, 16, 28, 0.12));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.stick:not(.active) {
+  left: calc(34px + var(--sl));
+  top: auto;
+  bottom: calc(30px + var(--sb));
+  margin: 0;
+}
+.touch-ui:is([data-state='foot'], [data-state='fly'], [data-state='orbit'], [data-state='photo']) .stick:not(.steer) {
+  opacity: 0.45;
+}
+.stick.active {
+  opacity: 1 !important;
+}
+.stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  background: rgba(207, 233, 255, 0.22);
+  border: 1px solid rgba(207, 233, 255, 0.6);
+}
+/* the steering ring only shows while a finger is on it */
+.stick.steer:not(.active) {
+  display: none;
+}
+.stick.steer {
+  border-style: dashed;
+}
+
+/* which groups show in which state */
+.touch-photo,
+.shutter,
+.photo-exit {
+  display: none;
+}
+.touch-ui[data-state='photo'] .touch-top,
+.touch-ui[data-state='photo'] .touch-actions,
+.touch-ui[data-state='photo'] .touch-context {
+  display: none;
+}
+.touch-ui[data-state='photo'] .touch-photo {
+  position: absolute;
+  top: calc(10px + var(--st));
+  left: calc(12px + var(--sl));
+  right: calc(96px + var(--sr));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.touch-photo .tbtn.pill {
+  height: 36px;
+  padding: 0 12px;
+}
+.touch-ui[data-state='photo'] .photo-exit {
+  display: block;
+  position: absolute;
+  top: calc(10px + var(--st));
+  right: calc(12px + var(--sr));
+  color: #ffe7c7;
+  border-color: var(--warm);
+}
+.touch-ui[data-state='photo'] .shutter {
+  display: block;
+  --s: 72px;
+  right: calc(26px + var(--sr));
+  bottom: calc(26px + var(--sb));
+  border: 3px solid rgba(240, 248, 255, 0.85);
+  background: rgba(240, 248, 255, 0.18);
+  box-shadow: inset 0 0 0 5px rgba(8, 16, 28, 0.35);
+}
+
+/* ---------- HUD with touch ---------- */
+.touch .prompt,
+.touch .photo-hint {
+  display: none;
+}
+.touch .hud-tl {
+  left: calc(16px + var(--sl));
+  top: calc(12px + var(--st));
+  max-width: min(340px, 42vw);
+}
+.touch .hint {
+  top: calc(64px + var(--st));
+  right: calc(16px + var(--sr));
+  max-width: 260px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.touch .dcard {
+  top: calc(64px + var(--st));
+  right: calc(14px + var(--sr));
+}
+.touch .feed {
+  left: calc(16px + var(--sl));
+  right: auto;
+  bottom: calc(164px + var(--sb));
+  align-items: flex-start;
+}
+.touch .feed-item {
+  border-right: none;
+  border-left: 3px solid var(--c);
+  background: linear-gradient(90deg, rgba(10, 18, 30, 0.6), rgba(0, 0, 0, 0));
+  transform: translateX(-20px);
+}
+.touch .feed-item.show {
+  transform: none;
+}
+.touch .feed-item:nth-last-child(n + 5) {
+  display: none;
+}
+.touch .hud-bottom {
+  bottom: calc(14px + var(--sb));
+}
+.touch .photo-status {
+  top: calc(60px + var(--st));
+}
+
+/* portrait: the readouts and the pop-up buttons move up out of the way of
+   the stick and the cluster */
+@media (orientation: portrait) {
+  .touch .hud-bottom {
+    bottom: calc(262px + var(--sb));
+  }
+  .touch-context {
+    left: 12px;
+    right: 12px;
+    bottom: calc(200px + var(--sb));
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .touch .feed {
+    bottom: calc(350px + var(--sb));
+  }
+  /* under the top bar, which takes the whole top right */
+  .touch .hud-tl {
+    top: calc(64px + var(--st));
+    max-width: calc(100vw - 32px);
+  }
+  /* the corner is too narrow to share with the location, so it goes under it */
+  .touch .dcard {
+    top: calc(236px + var(--st));
+    left: 0;
+    right: 0;
+    width: min(300px, calc(100vw - 32px));
+    margin: 0 auto;
+  }
+  .touch .banner {
+    top: 45%;
+  }
+  .touch .hint {
+    display: none;
+  }
+}
+
+/* ---------- menus with touch ---------- */
+.touch .btn {
+  min-height: 44px;
+}
+.touch .btn.small {
+  min-height: 38px;
+}
+.touch .tab {
+  padding: 12px 14px;
+}
+.touch .inv-close {
+  padding: 6px 14px;
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ui);
+  border: 1px solid var(--ui-line);
+  border-radius: 3px;
+  margin-bottom: 6px;
+}
+.touch .inv-close kbd {
+  display: none;
+}
+/* phones upright: tabs on one row, the counts and a small close under them */
+@media (max-width: 560px) {
+  .touch .inv-close {
+    order: 4;
+    margin: 0 0 8px auto;
+    padding: 2px 12px;
+    font-size: 0;
+  }
+  .touch .inv-close::before {
+    content: '\00d7';
+    font-size: 22px;
+    line-height: 1;
+  }
+  .touch .inv-status {
+    order: 3;
+    flex-basis: calc(100% - 64px);
+    margin: 2px 0 8px;
+    padding: 0 6px;
+    gap: 14px;
+    font-size: 13px;
+  }
+  .touch .tab {
+    padding: 10px 6px;
+  }
+}
+.touch .settings label {
+  min-height: 36px;
+}
+.touch .settings input[type='range'] {
+  height: 32px;
+}
+.touch .seed-input {
+  /* iOS zooms into inputs with text under 16px */
+  font-size: 16px;
+  padding: 6px 8px;
+}
+
+/* galaxy map: buttons instead of keys, no hover label */
+.gmap-touch {
+  display: none;
+}
+.touch .gmap-keys,
+.touch .gmap-hover {
+  display: none;
+}
+.touch .gmap-touch {
+  position: absolute;
+  right: calc(16px + var(--sr));
+  bottom: calc(16px + var(--sb));
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}
+.touch .gmap-legend {
+  left: calc(16px + var(--sl));
+  bottom: calc(16px + var(--sb));
+}
+@media (orientation: portrait) {
+  .touch .gmap-legend {
+    bottom: calc(66px + var(--sb));
+  }
+}
+/* leaves room for the buttons under it. Narrow screens already put it under the title. */
+@media (min-width: 721px) {
+  .touch .gmap-info {
+    right: calc(16px + var(--sr));
+    top: calc(14px + var(--st));
+    max-height: calc(100vh - 110px);
+  }
+}

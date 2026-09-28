@@ -237,6 +237,19 @@ function xfRings(rings, matrix) {
   return rings;
 }
 
+function bevelPlate(m, outline, bottom, top, bevel, matrix, face, edge = face) {
+  const cx = outline.reduce((sum, p) => sum + p[0], 0) / outline.length;
+  const cz = outline.reduce((sum, p) => sum + p[1], 0) / outline.length;
+  const ring = (y, inset) => outline.map(([x, z]) => {
+    const d = Math.hypot(x - cx, z - cz);
+    const k = 1 - inset / Math.max(d, inset * 2);
+    return new THREE.Vector3(cx + (x - cx) * k, y, cz + (z - cz) * k);
+  });
+  const b = Math.min(bevel, (top - bottom) * 0.35);
+  const rings = [ring(bottom, bevel), ring(bottom + b, 0), ring(top - b, 0), ring(top, bevel)];
+  loft(m, xfRings(rings, matrix), (i, j) => j < 0 ? face : edge, { capStart: true, capEnd: true });
+}
+
 // Hull cross section: flat bottom, chamfered lower edge, straight side,
 // two faced shoulder and a flat top with points for the racing stripes.
 // 16 points, segment 0 and 15 are the bottom, 6 and 9 the stripes.
@@ -505,7 +518,7 @@ export function buildShip(colors = {}) {
   G.part(0.3);
   loft(G, canopy.map(([z, aw, ah]) => archRing(z, aw, ah, sill(z))), () => C.white, { closed: false, capStart: true });
 
-  // canopy frame: sill rails, front edge and one hoop
+  // canopy frame
   H.part(0.6);
   for (const s of [-1, 1]) {
     for (let i = 0; i < canopy.length - 1; i++) {
@@ -521,6 +534,12 @@ export function buildShip(colors = {}) {
   };
   hoop(-4.22, 0.05);
   hoop(-3.05, 0.045);
+  hoop(-1.34, 0.055);
+  for (let i = 0; i < canopy.length - 1; i++) {
+    const [z0, , h0] = canopy[i];
+    const [z1, , h1] = canopy[i + 1];
+    bar(H, new THREE.Vector3(0, sill(z0) + h0 + 0.012, z0), new THREE.Vector3(0, sill(z1) + h1 + 0.012, z1), 0.023, C.hull, 0, 6);
+  }
 
   // cockpit: seat, console with screens, stick and a dashboard bobblehead
   H.part(0.7);
@@ -528,6 +547,11 @@ export function buildShip(colors = {}) {
   H.add(new THREE.BoxGeometry(0.28, 0.14, 0.3), T(0, 0.48, -2.45), C.trim);
   H.add(new RoundedBoxGeometry(0.5, 0.5, 0.12, 2, 0.04), T(0, 0.86, -2.18, 0.18), C.soft);
   H.add(new RoundedBoxGeometry(0.3, 0.16, 0.1, 2, 0.03), T(0, 1.09, -2.13, 0.18), C.trim);
+  for (const s of [-1, 1]) {
+    H.add(new RoundedBoxGeometry(0.08, 0.075, 0.38, 1, 0.02), T(s * 0.29, 0.73, -2.43), C.trim);
+    H.add(new THREE.BoxGeometry(0.055, 0.34, 0.015), T(s * 0.135, 0.87, -2.263, 0.18), C.trim);
+    H.add(new THREE.BoxGeometry(0.075, 0.045, 0.025), T(s * 0.135, 0.75, -2.281, 0.18), C.chrome, 1);
+  }
   const consoleM = T(0, 0.6, -3.45, -0.4);
   H.add(new RoundedBoxGeometry(0.92, 0.3, 0.34, 2, 0.04), consoleM, C.trim);
   H.add(new THREE.CylinderGeometry(0.025, 0.03, 0.3, 6), T(0, 0.56, -2.85, -0.2), C.metal, 1);
@@ -560,8 +584,9 @@ export function buildShip(colors = {}) {
   // cheek vents under the canopy
   for (const s of [-1, 1]) {
     const x = s * noseAt(-3.2).w;
-    H.add(new THREE.BoxGeometry(0.04, 0.26, 0.62), T(x, -0.1, -3.2), C.dark);
-    for (let k = 0; k < 3; k++) H.add(new THREE.BoxGeometry(0.05, 0.035, 0.58), T(x + s * 0.012, -0.18 + k * 0.08, -3.2), C.hull);
+    H.add(new RoundedBoxGeometry(0.08, 0.3, 0.76, 1, 0.035), T(x, -0.1, -3.2), C.trim);
+    H.add(new THREE.BoxGeometry(0.085, 0.2, 0.62), T(x, -0.1, -3.2), C.dark);
+    for (let k = 0; k < 3; k++) H.add(new THREE.BoxGeometry(0.06, 0.032, 0.59), T(x + s * 0.032, -0.18 + k * 0.08, -3.2, 0, 0, s * 0.2), C.hull);
   }
 
   // RCS thruster blocks at the four corners
@@ -578,8 +603,8 @@ export function buildShip(colors = {}) {
   const podX = 2.05;
   const podY = 0.02;
   const podProfile = [
-    [0.44, 0.02], [0.6, -0.04], [0.69, 0.1], [0.74, 0.45], [0.75, 0.9], [0.75, 1.25], [0.75, 2.26], [0.735, 2.29], [0.735, 2.33], [0.75, 2.36],
-    [0.75, 3.05], [0.7, 3.55], [0.62, 3.8], [0.61, 3.95], [0.58, 4.36], [0.5, 4.38],
+    [0.44, 0.02], [0.6, -0.04], [0.69, 0.1], [0.765, 0.45], [0.785, 0.9], [0.785, 1.25], [0.75, 2.26], [0.728, 2.29], [0.728, 2.33], [0.75, 2.36],
+    [0.735, 3.05], [0.68, 3.55], [0.62, 3.8], [0.61, 3.95], [0.58, 4.36], [0.5, 4.38],
   ];
   const podPaint = (i, j) => {
     // hazard striped intake lip
@@ -589,6 +614,8 @@ export function buildShip(colors = {}) {
     if (i === 11) return C.trim;
     if (i === 13) return [j % 2 ? C.metal : C.chrome, 1];
     if (i >= 12) return [C.metal, 1];
+    if (j >= 6 && j <= 10) return C.trim;
+    if (j === 2) return C.top;
     return C.hull;
   };
   for (const s of [-1, 1]) {
@@ -609,10 +636,20 @@ export function buildShip(colors = {}) {
       const a = (k / 8) * Math.PI * 2;
       H.add(new THREE.BoxGeometry(0.26, 0.022, 0.12), pm.clone().multiply(T(0, 0, 0.5, 0, 0, a)).multiply(T(0.28, 0, 0, 0.55)), C.metal, 1);
     }
-    // vent grille on top of the pod
+    // A raised cowl leaves the cooling slots below its lip.
     H.part(0.6);
-    H.add(new RoundedBoxGeometry(0.36, 0.08, 0.62, 2, 0.02), T(px, podY + 0.745, 2.95), C.dark);
-    for (let k = 0; k < 5; k++) H.add(new THREE.BoxGeometry(0.33, 0.03, 0.045), T(px, podY + 0.79, 2.72 + k * 0.115), C.hull);
+    const cowl = [[-0.29, 1.3], [-0.36, 1.55], [-0.28, 3.22], [-0.17, 3.4], [0.17, 3.4], [0.28, 3.22], [0.36, 1.55], [0.29, 1.3]];
+    bevelPlate(H, cowl, podY + 0.64, podY + 0.82, 0.05, T(px), C.hull, C.flap);
+    H.add(new RoundedBoxGeometry(0.36, 0.05, 1.15, 1, 0.025), T(px, podY + 0.832, 2.36), C.dark);
+    for (let k = 0; k < 7; k++) H.add(new THREE.BoxGeometry(0.32, 0.04, 0.045), T(px, podY + 0.855, 1.91 + k * 0.15, -0.28), C.metal, 1);
+    H.add(new RoundedBoxGeometry(0.22, 0.04, 0.3, 1, 0.025), T(px, podY + 0.838, 1.54), C.accent);
+    // Longitudinal ribs on the nozzle collar catch the light from behind.
+    for (let k = 0; k < 12; k++) {
+      const a = (k + 0.5) * Math.PI / 6;
+      const start = new THREE.Vector3(px + Math.cos(a) * 0.611, podY + Math.sin(a) * 0.611, 3.96);
+      const end = new THREE.Vector3(px + Math.cos(a) * 0.582, podY + Math.sin(a) * 0.582, 4.32);
+      bar(H, start, end, 0.018, C.chrome, 1, 4);
+    }
     // glowing nozzle: hot disc, then the inner bell fading toward the lip
     lensDisc(L, T(px, podY, 3.97), 0.44, 12, hot.clone().multiplyScalar(3.2), glow.clone().multiplyScalar(2.2), THRUST);
     const bell = xfRings(latheRings([[0.44, 3.97], [0.5, 4.37]], 12, Math.PI / 12), pm);
@@ -624,11 +661,14 @@ export function buildShip(colors = {}) {
       L.tri(bell[0][k], bell[0][k2], bell[1][k2], cA, THRUST, bc, -1, cA, cB);
       L.tri(bell[0][k], bell[1][k2], bell[1][k], cA, THRUST, bc, -1, cB, cB);
     }
-    // accent light strip along the outer flank
-    const sx = px + s * 0.73;
-    const strip = [[1.5, -0.03], [3.0, -0.03], [3.0, 0.05], [1.5, 0.05]].map(([z, y]) => new THREE.Vector3(sx, podY + y, z));
-    L.tri(strip[0], strip[1], strip[2], glow.clone().multiplyScalar(1.4), STEADY, new THREE.Vector3(px, podY, 2.2));
-    L.tri(strip[0], strip[2], strip[3], glow.clone().multiplyScalar(1.4), STEADY, new THREE.Vector3(px, podY, 2.2));
+    const sx = px + s * 0.768;
+    H.add(new RoundedBoxGeometry(0.065, 0.25, 1.18, 1, 0.03), T(sx, podY + 0.01, 1.8), C.trim);
+    for (let k = 0; k < 3; k++) {
+      const z0 = 1.36 + k * 0.31;
+      const strip = [[z0, -0.014], [z0 + 0.25, -0.014], [z0 + 0.25, 0.034], [z0, 0.034]].map(([z, y]) => new THREE.Vector3(sx + s * 0.035, podY + y, z));
+      L.tri(strip[0], strip[1], strip[2], glow.clone().multiplyScalar(1.25), STEADY, new THREE.Vector3(px, podY, 2.2));
+      L.tri(strip[0], strip[2], strip[3], glow.clone().multiplyScalar(1.25), STEADY, new THREE.Vector3(px, podY, 2.2));
+    }
     nozzles.push(new THREE.Vector3(px, podY, 3.98));
   }
 
@@ -652,6 +692,10 @@ export function buildShip(colors = {}) {
     return j === 3 ? C.flap : C.hull;
   };
   for (const s of [-1, 1]) {
+    H.part(0.6);
+    const fairing = [[1.06, -0.82, 3.55, 0.48, -0.25], [1.28, -0.6, 3.54, 0.43, -0.29], [1.63, -0.03, 3.48, 0.33, -0.4], [1.92, 0.54, 3.32, 0.26, -0.53]];
+    const fairingRings = fairing.map(([x, le, te, t, y]) => foilRing(s * x, le, te, t, y));
+    loft(H, fairingRings, (i, j) => j === 0 || j === 9 ? C.accent : j >= 4 ? C.trim : C.hull, { capStart: true, capEnd: true });
     H.part(0.45);
     for (const [stations, cut] of wingParts) {
       const rings = stations.map((w) => foilRing(w, wle(w), cut ? FLAP_Z : wte(w), wt(w), wy(w)));
@@ -665,6 +709,9 @@ export function buildShip(colors = {}) {
     const tm = T(tx, ty, 0);
     H.part(0.62);
     loft(H, xfRings(latheRings([[0.13, 0.55], [0.2, 0.75], [0.24, 1.1], [0.24, 2.55], [0.2, 2.95], [0.12, 3.15]], 8, Math.PI / 8), tm), (i) => (i === 3 ? C.trim : C.accent), { capStart: true, capEnd: true });
+    H.part(0.5);
+    const winglet = [0, 0.18, 0.6, 0.72].map((h) => foilRing(h, 1.24 + h * 1.05, 2.91 - h * 0.28, 0.11 - h * 0.08, 0));
+    loft(H, xfRings(winglet, T(tx, ty + 0.07, 0, 0, 0, Math.PI / 2 - s * 0.3)), (i, j) => j < 0 || j === 0 || j >= 4 ? C.trim : i === 2 ? C.accent : C.hull, { capStart: true, capEnd: true });
     L.part(0.6);
     lampDome(L, T(tx, ty, 0.56, 0, Math.PI), 0.135, (s < 0 ? lampRed : lampGreen).clone().multiplyScalar(4), STEADY);
     lampDome(L, T(tx, ty, 3.14), 0.12, lampWhite, STROBE);
@@ -893,9 +940,16 @@ export function buildShip(colors = {}) {
     put(g.piston, new THREE.CylinderGeometry(0.065, 0.065, 0.5 - rodBottom, 8), T(0, (0.5 + rodBottom) / 2, 0), C.chrome, 1);
     put(g.piston, new THREE.CylinderGeometry(0.075, 0.075, 0.22, 8), T(0, rodBottom, 0, 0, 0, Math.PI / 2), C.metal, 1);
     for (const x of [-0.09, 0.09]) put(g.foot, new THREE.BoxGeometry(0.035, 0.14, 0.1), T(x, -0.05, 0), C.metal, 1);
-    put(g.foot, new THREE.CylinderGeometry(0.17, 0.24, 0.05, 10), T(0, -0.07, 0), C.accent);
-    put(g.foot, new THREE.CylinderGeometry(0.27, 0.29, 0.09, 10), T(0, -0.135, 0), C.trim);
-    put(g.foot, new THREE.CylinderGeometry(0.29, 0.28, 0.03, 10), T(0, -0.195, 0), C.dark);
+    put(g.foot, new THREE.CylinderGeometry(0.15, 0.2, 0.065, 8), T(0, -0.08, 0), C.accent);
+    R.bone = bones.indexOf(g.foot);
+    R.part(0.6);
+    const footOutline = [[-0.21, -0.39], [0.21, -0.39], [0.33, -0.22], [0.33, 0.24], [0.2, 0.38], [-0.2, 0.38], [-0.33, 0.24], [-0.33, -0.22]];
+    bevelPlate(R, footOutline, -PAD, -0.17, 0.028, g.foot.matrixWorld, C.dark);
+    bevelPlate(R, footOutline, -0.175, -0.105, 0.05, g.foot.matrixWorld, C.flap, C.trim);
+    for (const z of [-0.27, 0.26]) {
+      put(g.foot, new THREE.BoxGeometry(0.34, 0.012, 0.045), T(0, -0.099, z), C.accent);
+      for (const x of [-0.225, 0.225]) put(g.foot, new THREE.CylinderGeometry(0.027, 0.027, 0.017, 6), T(x, -0.098, z * 0.76), C.metal, 1);
+    }
     // two doors per bay, trim outside with an accent edge
     const [x0, z0, x1, z1] = g.bay;
     const hw = (x1 - x0) / 2 - 0.004;

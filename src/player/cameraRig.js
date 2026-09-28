@@ -11,6 +11,14 @@ const _m = new THREE.Matrix4();
 const Y = new THREE.Vector3(0, 1, 0);
 const X = new THREE.Vector3(1, 0, 0);
 
+// The fovs here are vertical, which in a tall portrait view leaves a sliver of
+// the world side to side. Portrait gets a wider vertical fov, about halfway to
+// keeping the horizontal fov of a square view.
+export function portraitFov(fov, aspect) {
+  if (aspect >= 1) return fov;
+  return (Math.atan(Math.tan((fov * Math.PI) / 360) / Math.sqrt(aspect)) * 360) / Math.PI;
+}
+
 // Works out where the camera is in the controlled entity's frame, then turns
 // that into a world transform for the floating origin.
 export class CameraRig {
