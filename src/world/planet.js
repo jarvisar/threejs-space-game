@@ -1,0 +1,341 @@
+import * as THREE from 'three';
+import { TerrainGenerator, faceDir } from '../gen/terrain.js';
+import { CHUNK_N, buildChunkIndex } from './chunkBuilder.js';
+import { createTerrainMaterial } from '../render/materials.js';
+import { Body } from './body.js';
+
+let sharedIndex = null;
+function chunkIndex() {
+  if (!sharedIndex) sharedIndex = new THREE.BufferAttribute(buildChunkIndex(CHUNK_N), 1);
+  return sharedIndex;
+}
+
+const _v = new THREE.Vector3();
+
+// Shared by rocky planets and gas giants. Scattering coefficients are picked
+// so the zenith optical depth of the strongest channel is about 0.4 * density,
+// whatever the atmosphere thickness is.
+export function fillAtmoCommon(body, s) {
+  const a = body.def.atmosphere;
+  s.center.copy(body.group.position);
+  s.radius = body.radius;
+  if (a) {
+    s.atmoRadius = body.radius + a.height;
+    const scaleR = a.height * 0.22;
+    const scaleM = a.height * 0.08;
+    const m = Math.max(a.sky[0], a.sky[1], a.sky[2]);
+    const k = (0.45 * a.density) / scaleR;
+    // squaring the tint pushes the channel ratios toward Earth-like contrast
+    s.betaR.set(Math.pow(a.sky[0] / m, 2) * k, Math.pow(a.sky[1] / m, 2) * k, Math.pow(a.sky[2] / m, 2) * k);
+    s.betaM = (0.018 * a.mie * a.density) / scaleM;
+    s.scaleR = scaleR;
+    s.scaleM = scaleM;
+    s.mieG = a.mieG;
+  } else {
+    s.atmoRadius = body.radius + (body.maxH || 0) + 20;
+    s.betaR.set(0, 0, 0);
+    s.betaM = 0;
+    s.scaleR = 0;
+    s.scaleM = 1;
+  }
+  s.sunDir.copy(body.position).multiplyScalar(-1).normalize();
+  s.rot.copy(body.rotUniform.value);
+  s.ocean = 0;
+  s.cloudCov = 0;
+  s.camAlt = body.camDist - body.radius;
+  s.solidR = body.radius * 0.995;
+}
+
+class Node {
+  constructor(planet, face, level, x, y) {
+    this.face = face;
+    this.level = level;
+    this.x = x;
+    this.y = y;
+    this.children = null;
+    this.mesh = null;
+    this.job = null;
+    this.ready = false;
+    this.hiddenAt = 0;
+    const size = 2 / (1 << level);
+    const d = faceDir(face, -1 + (x + 0.5) * size, -1 + (y + 0.5) * size, [0, 0, 0]);
+    this.dir = new THREE.Vector3(d[0], d[1], d[2]);
+    this.center = this.dir.clone().multiplyScalar(planet.radius);
+    this.size = (planet.radius * Math.PI) / 2 / (1 << level);
+    this.angle = (this.size * 0.75) / planet.radius;
+    this.minH = planet.minH;
+    this.maxH = planet.maxH;
+  }
+}
+
+export class Planet extends Body {
+  constructor(def, pool, index) {
+    super();
+    this.initBody(def);
+    this.index = index;
+    this.pool = pool;
+    this.gen = new TerrainGenerator(def.terrain);
+    this.maxH = this.gen.maxHeight();
+    this.minH = this.gen.minHeight();
+    this.atmoRadius = def.atmosphere ? def.radius + def.atmosphere.height : def.radius + this.maxH;
+    this.seaLevel = def.ocean ? def.radius : null;
+
+    // finest level where vertex spacing drops to about a meter
+    const spacingTarget = 1.0;
+    this.maxLevel = Math.max(4, Math.ceil(Math.log2((this.radius * Math.PI) / (2 * (CHUNK_N - 1) * spacingTarget))));
+    this.finestLod = ((this.radius * Math.PI) / 2 / (1 << this.maxLevel) / (CHUNK_N - 1)) * 1.6;
+
+    this.uniforms = {
+      center: { value: new THREE.Vector3() },
+      radius: { value: def.radius },
+      rot: this.rotUniform,
+      sky: { value: new THREE.Color() },
+      ground: { value: new THREE.Color() },
+      scanPos: { value: new THREE.Vector3() },
+      scanRadius: { value: 0 },
+    };
+    this.computeAmbient();
+    this.material = createTerrainMaterial(def, this.uniforms);
+    this.roots = [];
+    for (let f = 0; f < 6; f++) this.roots.push(new Node(this, f, 0, 0, 0));
+    this.lodFactor = 2.2;
+    this.chunkCount = 0;
+    this.time = 0;
+    this.focus = false;
+
+    pool.broadcast({ type: 'planet', id: def.id, terrain: def.terrain });
+  }
+
+  computeAmbient() {
+    const def = this.def;
+    if (def.atmosphere) {
+      const s = def.atmosphere.sky;
+      const m = Math.max(s[0], s[1], s[2]);
+      // sky ambient is roughly the Rayleigh tint, brighter for denser air
+      const k = 0.42 * Math.min(1.3, def.atmosphere.density);
+      this.uniforms.sky.value.setRGB((s[0] / m) * k + 0.07, (s[1] / m) * k + 0.07, (s[2] / m) * k + 0.07);
+      const g = new THREE.Color(def.palette.low);
+      this.uniforms.ground.value.copy(g).multiplyScalar(0.25).add(new THREE.Color(0.06, 0.05, 0.04));
+    } else {
+      this.uniforms.sky.value.setRGB(0.04, 0.045, 0.06);
+      this.uniforms.ground.value.setRGB(0.02, 0.02, 0.02);
+    }
+  }
+
+  // Surface height in meters at a planet-local direction, matching the finest mesh.
+  heightAt(dir) {
+    return this.gen.height(dir.x, dir.y, dir.z, this.finestLod);
+  }
+
+  sampleAt(dir, out) {
+    return this.gen.sample(dir.x, dir.y, dir.z, out, this.finestLod);
+  }
+
+  // Ground radius including oceans (liquid counts as a floor for the player)
+  floorRadius(dir) {
+    const h = this.heightAt(dir);
+    if (this.seaLevel !== null && h < 0) return this.radius;
+    return this.radius + h;
+  }
+
+  // expects updateRotation() to have run this frame
+  update(camWorld, now) {
+    this.time = now;
+    this.toLocal(camWorld, this.camLocal);
+    const D = this.camLocal.length();
+    const rmin = this.radius + this.minH;
+    this.camDist = D;
+    this.horizon = D > rmin ? Math.acos(rmin / D) : 0;
+    this.horizonMax = Math.acos(rmin / (this.radius + this.maxH));
+    this.camDir = _v.copy(this.camLocal).normalize().clone();
+    for (const r of this.roots) this.updateNode(r);
+  }
+
+  isBeyondHorizon(node) {
+    if (this.camDist < this.radius + this.maxH * 2) {
+      // close to the ground the cone test gets too aggressive near cliffs
+      const phi = Math.acos(Math.max(-1, Math.min(1, node.dir.dot(this.camDir))));
+      return phi - node.angle > this.horizon + this.horizonMax + 0.05;
+    }
+    const phi = Math.acos(Math.max(-1, Math.min(1, node.dir.dot(this.camDir))));
+    return phi - node.angle > this.horizon + this.horizonMax;
+  }
+
+  shouldSplit(node) {
+    if (node.level >= this.maxLevel) return false;
+    const d = _v.subVectors(this.camLocal, node.center).length() - node.size * 0.5;
+    return d < node.size * this.lodFactor;
+  }
+
+  updateNode(node) {
+    const hidden = this.isBeyondHorizon(node);
+    if (!hidden && this.shouldSplit(node)) {
+      if (!node.children) {
+        const l = node.level + 1;
+        node.children = [
+          new Node(this, node.face, l, node.x * 2, node.y * 2),
+          new Node(this, node.face, l, node.x * 2 + 1, node.y * 2),
+          new Node(this, node.face, l, node.x * 2, node.y * 2 + 1),
+          new Node(this, node.face, l, node.x * 2 + 1, node.y * 2 + 1),
+        ];
+      }
+      let allReady = true;
+      for (const c of node.children) {
+        if (!c.ready) {
+          allReady = false;
+          this.request(c);
+        }
+      }
+      node.childrenIdleSince = 0;
+      if (allReady) {
+        this.setVisible(node, false);
+        for (const c of node.children) this.updateNode(c);
+        return;
+      }
+      for (const c of node.children) this.hideSubtree(c);
+      this.show(node);
+      return;
+    }
+
+    if (hidden) this.setVisible(node, false);
+    else this.show(node);
+    if (node.children) {
+      for (const c of node.children) this.hideSubtree(c);
+      // keep unused children around briefly in case the camera turns back
+      if (!node.childrenIdleSince) node.childrenIdleSince = this.time;
+      if (this.time - node.childrenIdleSince > 4) {
+        for (const c of node.children) this.disposeSubtree(c);
+        node.children = null;
+        node.childrenIdleSince = 0;
+      }
+    }
+  }
+
+  show(node) {
+    if (node.ready) this.setVisible(node, true);
+    else this.request(node);
+  }
+
+  setVisible(node, v) {
+    if (node.mesh) node.mesh.visible = v;
+  }
+
+  hideSubtree(node) {
+    let was = false;
+    if (node.mesh && node.mesh.visible) {
+      node.mesh.visible = false;
+      was = true;
+    }
+    if (node.children) for (const c of node.children) was = this.hideSubtree(c) || was;
+    return was;
+  }
+
+  disposeSubtree(node) {
+    if (node.children) for (const c of node.children) this.disposeSubtree(c);
+    node.children = null;
+    if (node.job) {
+      this.pool.cancel(node.job);
+      node.job = null;
+    }
+    if (node.mesh) {
+      this.group.remove(node.mesh);
+      // the index buffer is shared, detach it so dispose() doesn't free it
+      node.mesh.geometry.setIndex(null);
+      node.mesh.geometry.dispose();
+      node.mesh = null;
+      this.chunkCount--;
+    }
+    node.ready = false;
+    node.disposed = true;
+  }
+
+  request(node) {
+    if (node.job || node.ready) return;
+    const planet = this;
+    node.job = this.pool.request(
+      { type: 'chunk', planetId: this.def.id, face: node.face, level: node.level, x: node.x, y: node.y, N: CHUNK_N },
+      () => {
+        // same rough "meters away" scale the scatter jobs use
+        const d = _v.subVectors(planet.camLocal, node.center).length();
+        const behind = planet.isBeyondHorizon(node) ? 8 : 1;
+        return (d / (node.size + 1)) * 60 * behind + (planet.focus ? 0 : 1e6);
+      },
+      (res) => {
+        node.job = null;
+        if (node.disposed) return;
+        this.buildMesh(node, res);
+      }
+    );
+  }
+
+  buildMesh(node, res) {
+    const geo = new THREE.BufferGeometry();
+    geo.setIndex(chunkIndex());
+    geo.setAttribute('position', new THREE.BufferAttribute(res.positions, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(res.normals, 3));
+    geo.setAttribute('aData', new THREE.BufferAttribute(res.data, 2));
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), res.radius);
+    const mesh = new THREE.Mesh(geo, this.material);
+    mesh.position.set(res.center[0], res.center[1], res.center[2]);
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    mesh.visible = false;
+    mesh.receiveShadow = true;
+    mesh.castShadow = false;
+    node.center.set(res.center[0], res.center[1], res.center[2]);
+    node.minH = res.minH;
+    node.maxH = res.maxH;
+    node.mesh = mesh;
+    node.ready = true;
+    this.group.add(mesh);
+    this.chunkCount++;
+  }
+
+  // world-space placement for the floating origin
+  updateRender(origin) {
+    super.updateRender(origin);
+    this.uniforms.center.value.copy(this.group.position);
+  }
+
+  get hasAtmoPass() {
+    return !!(this.def.atmosphere || this.def.ocean);
+  }
+
+  fillAtmoSlot(s) {
+    fillAtmoCommon(this, s);
+    const def = this.def;
+    s.camAlt = this.camDist - this.radius;
+    s.solidR = this.radius * 0.995;
+    const o = def.ocean;
+    s.ocean = o ? { water: 1, lava: 2, ice: 3, acid: 4 }[o.mode] || 1 : 0;
+    if (o) {
+      s.oceanShallow.set(o.shallow);
+      s.oceanDeep.set(o.deep);
+    }
+    // storms thicken the haze and close up the cloud layer
+    const storm = this.stormK || 0;
+    if (storm > 0) s.betaM *= 1 + storm * 5;
+    const c = def.clouds;
+    if (c) {
+      s.cloudCov = Math.min(0.95, c.coverage + storm * 0.35);
+      s.cloudAlt = c.altitude;
+      s.cloudColor.set(c.color);
+      s.cloudScale = c.scale;
+      s.cloudSeed = c.seed;
+      s.cloudSpeed = c.speed;
+    } else {
+      s.cloudCov = 0;
+    }
+    s.ambient.copy(this.uniforms.sky.value);
+  }
+
+  dispose() {
+    for (const r of this.roots) this.disposeSubtree(r);
+    this.material.dispose();
+    if (this.rings) {
+      this.rings.geometry.dispose();
+      this.rings.material.dispose();
+    }
+    this.pool.broadcast({ type: 'drop', id: this.def.id });
+  }
+}
